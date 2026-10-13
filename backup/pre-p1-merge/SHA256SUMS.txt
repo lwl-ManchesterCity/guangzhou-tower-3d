@@ -1,0 +1,3 @@
+553c593286c420b8acbac2569a396fe58f9fbd584d9e16cebbf54075431713d0  public/data/jingtai-buildings-index.json
+a7936a9265a72d36ae37bba89333108f697043c2863d8fa83eb40d413a249075  public/data/jingtai-buildings.geojson
+899e25767be5e87ddc5aa6df921de3f190c339ecbe35954922e828b0bc0cd800  public/data/jingtai-metadata.json

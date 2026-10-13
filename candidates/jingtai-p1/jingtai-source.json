@@ -1,0 +1,15 @@
+{
+  "endpoint": "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  "fetchedAt": "2026-09-23T01:14:51.741Z",
+  "query": "[out:json][timeout:180][maxsize:268435456];\n(\n nwr(around:2000,23.17107,113.26646)[building]; nwr(around:2000,23.17107,113.26646)[\"building:part\"];\n way(1178149399);\n nwr(around:2000,23.17107,113.26646)[leisure~\"^(pitch|track|park|garden|nature_reserve)$\"];\n nwr(around:2000,23.17107,113.26646)[natural=wood]; nwr(around:2000,23.17107,113.26646)[landuse=forest];\n nwr(around:2000,23.17107,113.26646)[amenity~\"^(school|kindergarten|college|university|restaurant|cafe|fast_food|bar|pub|food_court|ice_cream)$\"];\n nwr(around:2000,23.17107,113.26646)[railway~\"^(station|subway_entrance)$\"];\n nwr(around:2000,23.17107,113.26646)[public_transport=station][subway=yes];\n nwr(around:2000,23.17107,113.26646)[shop];\n)->.places;\nway(around:2500,23.17107,113.26646)[highway]->.roads;\n(.places;.roads;node(w.roads);node(w.places););\nout body geom;",
+  "sha256": "ad6ece3db318289e9cc5fad9dd0fb8a6a60b4348863f63d4658d95d16b6db61d",
+  "center": {
+    "lat": 23.17107,
+    "lng": 113.26646
+  },
+  "radiusMeters": 2000,
+  "walkingRadiusMeters": 2500,
+  "osmTimestamp": "2026-09-23T01:13:01Z",
+  "attribution": "© OpenStreetMap contributors · ODbL",
+  "nameAddressSource": "用户核验附件 sonus-handoff-3d-neighborhood-v3.md；景泰校区，云龙路38号。半径遵循最新用户要求2km。"
+}

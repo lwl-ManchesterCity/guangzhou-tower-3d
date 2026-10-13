@@ -1,0 +1,480 @@
+{
+  "type": "jingtai-footprint-merge",
+  "generatedAt": "2026-09-23T05:32:29.740Z",
+  "elapsedMs": 2462,
+  "center": {
+    "lat": 23.17107,
+    "lng": 113.26646
+  },
+  "radiusMeters": 2000,
+  "nearFieldMeters": 500,
+  "source": {
+    "name": "东亚建筑矢量数据集（East Asian countries building vector data）",
+    "doi": "10.5281/zenodo.8174931",
+    "recordUrl": "https://zenodo.org/records/8174931",
+    "published": "2023-07-22",
+    "interpretedAt": "2023-04-23",
+    "archive": "East_Asian_buildings.zip",
+    "archiveBytes": 23108515351,
+    "archiveMd5": "d356f487b19eaa13c6e12eb42ac3ca53",
+    "member": "China/Guangdong/Guangzhou.shp",
+    "memberCrs": "EPSG:32649",
+    "license": "CC BY 4.0",
+    "licenseGap": "作者声明 CC BY 4.0；配套论文写明轮廓由高分辨率商业影像判读，归档内无许可文本与 STATUS 代码表，上游影像条款未清",
+    "noHeight": "数据集无 height/levels 字段，所有轮廓只能按默认 9.6 m 示意绘制",
+    "noNaming": "数据集无名称与地址字段，这些轮廓不参与楼名与地址检索",
+    "idPrefix": "eastasia/",
+    "footprintSource": "eastasia-2023",
+    "cardNote": "轮廓来自开放数据集东亚建筑矢量数据（DOI 10.5281/zenodo.8174931，CC BY 4.0，2023-04 影像判读）；该来源无高度、名称与用途字段。"
+  },
+  "rules": {
+    "minAreaSquareMeters": 20,
+    "duplicateMeters": 1,
+    "osmPrecedenceMeters": 15,
+    "rejectReasons": [
+      "invalid-geometry",
+      "outside-radius",
+      "inside-campus",
+      "tiny-area",
+      "matches-osm",
+      "duplicate-footprint"
+    ],
+    "policy": "面积阈值 → 重复合并 → 15 m 内以 OSM 为准 → 校园用地内一律剔除；新增轮廓只带示意高度，不进入名称检索"
+  },
+  "osmBase": {
+    "path": "public/data/jingtai-buildings.geojson",
+    "features": 906,
+    "strippedFromInput": 4780,
+    "sha256": "43e8bed4f279dd6f47c8e19ec9e6579fc976da159a89860831a1f86e0952663d"
+  },
+  "inputs": {
+    "public/data/jingtai-buildings.geojson": "b4bc8c035ed762bc60d22da41b5782348ba6dfc9db99524279e1eb42393b4fd3",
+    "public/data/jingtai-grounds.geojson": "66c9f6a6784071ab16446100fc7d81207d4807656dee287a3be39ad31c716d23",
+    "data/jingtai-eastasia-footprints.geojson": "fb478410cfbc3cec9bf284859db3a2830fafd19dba768801e9bf848782fb9cb3"
+  },
+  "counts": {
+    "osmBuildings": 906,
+    "addedFootprints": 4780,
+    "merged": 5686,
+    "nearFieldAdded": 616
+  },
+  "stats": {
+    "inputFeatures": 11257,
+    "inputParts": 11271,
+    "kept": 4780,
+    "records": 11257,
+    "rejected": {
+      "invalid-geometry": 0,
+      "outside-radius": 2535,
+      "inside-campus": 8,
+      "tiny-area": 1789,
+      "matches-osm": 2159,
+      "duplicate-footprint": 0
+    },
+    "samples": {
+      "matches-osm": [
+        {
+          "id": "gz-252",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-556",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-624",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-639",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-672",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-735",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-750",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-807",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-819",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-821",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-850",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-891",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-913",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-954",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-1003",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-1055",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-1104",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-1108",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-1201",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        },
+        {
+          "id": "gz-1253",
+          "part": 1,
+          "detail": "与既有 OSM 轮廓间距 ≤ 15 m，以 OSM 为准"
+        }
+      ],
+      "tiny-area": [
+        {
+          "id": "gz-563",
+          "part": 1,
+          "detail": "11.6 m² < 20 m²"
+        },
+        {
+          "id": "gz-613",
+          "part": 1,
+          "detail": "18.1 m² < 20 m²"
+        },
+        {
+          "id": "gz-833",
+          "part": 1,
+          "detail": "7.9 m² < 20 m²"
+        },
+        {
+          "id": "gz-897",
+          "part": 1,
+          "detail": "11.2 m² < 20 m²"
+        },
+        {
+          "id": "gz-967",
+          "part": 1,
+          "detail": "8.5 m² < 20 m²"
+        },
+        {
+          "id": "gz-1210",
+          "part": 1,
+          "detail": "1.6 m² < 20 m²"
+        },
+        {
+          "id": "gz-1354",
+          "part": 1,
+          "detail": "5.2 m² < 20 m²"
+        },
+        {
+          "id": "gz-1396",
+          "part": 1,
+          "detail": "1.3 m² < 20 m²"
+        },
+        {
+          "id": "gz-1664",
+          "part": 1,
+          "detail": "17.0 m² < 20 m²"
+        },
+        {
+          "id": "gz-1681",
+          "part": 1,
+          "detail": "4.5 m² < 20 m²"
+        },
+        {
+          "id": "gz-1827",
+          "part": 1,
+          "detail": "13.9 m² < 20 m²"
+        },
+        {
+          "id": "gz-1838",
+          "part": 1,
+          "detail": "13.5 m² < 20 m²"
+        },
+        {
+          "id": "gz-1912",
+          "part": 1,
+          "detail": "13.5 m² < 20 m²"
+        },
+        {
+          "id": "gz-2033",
+          "part": 1,
+          "detail": "9.5 m² < 20 m²"
+        },
+        {
+          "id": "gz-2078",
+          "part": 1,
+          "detail": "4.4 m² < 20 m²"
+        },
+        {
+          "id": "gz-2174",
+          "part": 1,
+          "detail": "9.0 m² < 20 m²"
+        },
+        {
+          "id": "gz-2286",
+          "part": 1,
+          "detail": "4.1 m² < 20 m²"
+        },
+        {
+          "id": "gz-2330",
+          "part": 1,
+          "detail": "13.5 m² < 20 m²"
+        },
+        {
+          "id": "gz-2349",
+          "part": 1,
+          "detail": "11.3 m² < 20 m²"
+        },
+        {
+          "id": "gz-2509",
+          "part": 1,
+          "detail": "11.5 m² < 20 m²"
+        }
+      ],
+      "outside-radius": [
+        {
+          "id": "gz-1145",
+          "part": 1,
+          "detail": "最近边 2051 m > 2000 m"
+        },
+        {
+          "id": "gz-1392",
+          "part": 1,
+          "detail": "最近边 2019 m > 2000 m"
+        },
+        {
+          "id": "gz-5651",
+          "part": 1,
+          "detail": "最近边 2022 m > 2000 m"
+        },
+        {
+          "id": "gz-5796",
+          "part": 1,
+          "detail": "最近边 2015 m > 2000 m"
+        },
+        {
+          "id": "gz-5799",
+          "part": 1,
+          "detail": "最近边 2277 m > 2000 m"
+        },
+        {
+          "id": "gz-5815",
+          "part": 1,
+          "detail": "最近边 2033 m > 2000 m"
+        },
+        {
+          "id": "gz-5913",
+          "part": 1,
+          "detail": "最近边 2057 m > 2000 m"
+        },
+        {
+          "id": "gz-5942",
+          "part": 1,
+          "detail": "最近边 2014 m > 2000 m"
+        },
+        {
+          "id": "gz-5947",
+          "part": 1,
+          "detail": "最近边 2031 m > 2000 m"
+        },
+        {
+          "id": "gz-5990",
+          "part": 1,
+          "detail": "最近边 2148 m > 2000 m"
+        },
+        {
+          "id": "gz-5992",
+          "part": 1,
+          "detail": "最近边 2052 m > 2000 m"
+        },
+        {
+          "id": "gz-5998",
+          "part": 1,
+          "detail": "最近边 2298 m > 2000 m"
+        },
+        {
+          "id": "gz-6144",
+          "part": 1,
+          "detail": "最近边 2021 m > 2000 m"
+        },
+        {
+          "id": "gz-6160",
+          "part": 1,
+          "detail": "最近边 2082 m > 2000 m"
+        },
+        {
+          "id": "gz-6197",
+          "part": 1,
+          "detail": "最近边 2273 m > 2000 m"
+        },
+        {
+          "id": "gz-6210",
+          "part": 1,
+          "detail": "最近边 2303 m > 2000 m"
+        },
+        {
+          "id": "gz-6240",
+          "part": 1,
+          "detail": "最近边 2280 m > 2000 m"
+        },
+        {
+          "id": "gz-6283",
+          "part": 1,
+          "detail": "最近边 2320 m > 2000 m"
+        },
+        {
+          "id": "gz-6354",
+          "part": 1,
+          "detail": "最近边 2271 m > 2000 m"
+        },
+        {
+          "id": "gz-6451",
+          "part": 1,
+          "detail": "最近边 2051 m > 2000 m"
+        }
+      ],
+      "inside-campus": [
+        {
+          "id": "gz-1216682",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        },
+        {
+          "id": "gz-1216705",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        },
+        {
+          "id": "gz-1216820",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        },
+        {
+          "id": "gz-1264740",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        },
+        {
+          "id": "gz-1264747",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        },
+        {
+          "id": "gz-1751636",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        },
+        {
+          "id": "gz-1780994",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        },
+        {
+          "id": "gz-1781004",
+          "part": 1,
+          "detail": "轮廓顶点落入校园用地面内"
+        }
+      ]
+    },
+    "minAreaSquareMeters": 20,
+    "duplicateMeters": 1,
+    "osmPrecedenceMeters": 15
+  },
+  "bands": [
+    {
+      "band": 100,
+      "osm": 0,
+      "merged": 48,
+      "added": 48
+    },
+    {
+      "band": 200,
+      "osm": 2,
+      "merged": 201,
+      "added": 199
+    },
+    {
+      "band": 300,
+      "osm": 17,
+      "merged": 348,
+      "added": 331
+    },
+    {
+      "band": 500,
+      "osm": 156,
+      "merged": 772,
+      "added": 616
+    },
+    {
+      "band": 1000,
+      "osm": 370,
+      "merged": 1828,
+      "added": 1458
+    },
+    {
+      "band": 2000,
+      "osm": 906,
+      "merged": 5686,
+      "added": 4780
+    }
+  ],
+  "addedAreaSquareMeters": {
+    "count": 4780,
+    "min": 20,
+    "median": 99,
+    "max": 11840,
+    "sum": 1066819
+  },
+  "addedWithin100m": {
+    "count": 48,
+    "min": 23,
+    "median": 77,
+    "max": 1377,
+    "sum": 6174
+  }
+}

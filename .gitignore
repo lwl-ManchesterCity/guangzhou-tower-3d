@@ -1,0 +1,21 @@
+# 装出来的、跑出来的，一律不进仓库：这三样都能从仓库里的东西重新长出来。
+node_modules/
+dist/
+dist-*/
+test-results/
+playwright-report/
+.cache/
+
+# 一次性取证截图（23 MB）：`scripts/shot-*.mjs` 与 `scripts/probe-*.mjs` 随时能再拍，
+# 要留在文档里的图一律放 `docs/screenshots/`，那里是入库的。
+shots/
+
+# 密钥与本机配置：高德 key 只在这一个文件里，快照在 `data/`（入库），但 key 本身永远不进。
+.env
+.env.*
+!.env.example
+
+# 系统与日志
+.DS_Store
+*.log
+npm-debug.log*

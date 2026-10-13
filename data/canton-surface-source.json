@@ -1,0 +1,16 @@
+{
+  "endpoint": "https://overpass-api.de/api/interpreter",
+  "fetchedAt": "2026-10-04T03:32:25.903Z",
+  "query": "[out:json][timeout:240][maxsize:1073741824];\n(\n nwr(around:3000,23.109,113.31913)[\"natural\"~\"^(water|wood|grassland|wetland|sand|beach)$\"];\n nwr(around:3000,23.109,113.31913)[\"waterway\"~\"^(riverbank|dock)$\"];\n nwr(around:3000,23.109,113.31913)[\"landuse\"~\"^(basin|reservoir|salt_pond|grass|greenfield|village_green|recreation_ground|flowerbelt|forest|cemetery|residential|commercial|retail|industrial|institutional|railway|military|construction|landfill|garages|allotments|farm|brownfield)$\"];\n nwr(around:3000,23.109,113.31913)[\"leisure\"~\"^(park|garden|nature_reserve|urban|common|pitch|track|golf_course|miniature_golf|recreation_ground)$\"];\n nwr(around:3000,23.109,113.31913)[\"amenity\"~\"^(hospital|school|kindergarten|college|university|townhall|library|marketplace|government|police|fire_station|community_centre|sports_centre|stadium|theatre|museum)$\"];\n nwr(around:3000,23.109,113.31913)[\"tourism\"~\"^(zoo|theme_park)$\"];\n nwr(around:3000,23.109,113.31913)[\"highway\"][\"area\"=\"yes\"];\n)->.surface;\n( .surface; way(r.surface); node(w.surface); );\nout body geom;",
+  "sha256": "e8d06e5d1341c06bb03fbe15571b581ee26c89069456b152f48680a6ac950487",
+  "center": {
+    "lat": 23.109,
+    "lng": 113.31913
+  },
+  "radiusMeters": 3000,
+  "elements": 10067,
+  "osmTimestamp": "2026-10-04T03:31:01Z",
+  "license": "ODbL-1.0",
+  "attribution": "© OpenStreetMap contributors",
+  "note": "边界逐字取 OSM：闭合 way 成环，multipolygon 按成员 way 首尾拼接，接不上的整条记入 skipped，不补坐标、不收口。"
+}
