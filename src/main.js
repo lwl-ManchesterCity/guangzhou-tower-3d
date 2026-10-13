@@ -557,6 +557,41 @@ try {
     // off the same 120 ms tick. What it still cannot answer is the tower's three lighting schemes - there is no tower
     // model in that scene yet - so `#tower-light` stays hidden and every button in it stays disabled.
     for (const button of document.querySelectorAll('#atmosphere-controls button[data-atmosphere-option], #recenter-button, #overview-button, #motion-toggle')) button.disabled = false;
+    // 这一侧还缺什么，写在界面上而不是只写在源码注释里（用户 2026-10-10 那句"灰着但不给理由"）。
+    // 三件事：灰掉的按钮各带一句原因；手势那一行改成这一侧真的会做的事（"点击楼块查看"在这里是不成立的）；
+    // 再加一行点名缺的整块。缩放这一格原来根本没有——MapLibre 那对 ＋－ 是它自带的控件，这一侧没有 MapLibre。
+    for (const [id, reason] of [
+      ['places-toggle', '地点清单还没接进这一侧'],
+      ['search-toggle', '楼名与地址检索还没接进这一侧'],
+      ['tour-start', '导览走的是逐栋飞镜头，这一侧还没有可点的楼块'],
+      ['explore-button', '这一侧的视角由拖动直接控制，没有探索/环绕两档'],
+      ['orbit-button', '这一侧的视角由拖动直接控制，没有探索/环绕两档'],
+    ]) {
+      const control = $(id);
+      if (control) control.title = `新引擎预览：${reason}`;
+    }
+    for (const key of document.querySelectorAll('.scene-key button')) key.title = '新引擎预览：高度透视镜还没接进这一侧';
+    $('gesture-hint').replaceChildren('拖动平移 ', element('span', '', '·'), ' ⌥ 或 右键拖动旋转 ', element('span', '', '·'),
+      ' 滚轮或 ＋－ 缩放');
+    const engineNote = element('p', 'engine-note', '新引擎预览：地面、楼块与近场车流已接；塔身、桥、树、点击出卡片、检索与导览还没过来。');
+    $('gesture-hint').after(engineNote);
+    const stepZoom = (delta) => {
+      const view = neighborhood.view();
+      // 限幅在相机自己手里（`clampZoom` 读 `VIEW_LIMITS`），这里只负责交一个层级差。
+      neighborhood.setView({ ...view, zoom: view.zoom + delta });
+    };
+    const zoomGroup = element('span', 'zoom-controls');
+    zoomGroup.setAttribute('role', 'group');
+    zoomGroup.setAttribute('aria-label', '缩放');
+    for (const [glyph, label, delta] of [['＋', '放大一级', 1], ['－', '缩小一级', -1]]) {
+      const button = element('button', 'zoom-step', glyph);
+      button.type = 'button';
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      button.addEventListener('click', () => stepZoom(delta));
+      zoomGroup.append(button);
+    }
+    $('view-controls').append(element('span', 'control-divider'), zoomGroup);
     const engineMotion = neighborhood.motionStatus();
     $('motion-toggle').setAttribute('aria-checked', String(engineMotion.on));
     document.body.dataset.motion = engineMotion.on ? 'on' : 'off';

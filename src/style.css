@@ -103,6 +103,14 @@ body[data-card='open'] .edition { opacity: 0; transition: opacity .18s ease; }
 .gesture-hint { position: absolute; z-index: 1; bottom: 25px; left: 56%; transform: translateX(-50%); margin: 0; font-size: 9px; color: #819694; white-space: nowrap; }
 .gesture-hint span { margin: 0 10px; color: #a4b4b2; }
 .scene-coordinate { position: absolute; z-index: 1; bottom: 25px; left: 43px; font: 8px var(--mono); color: #7f9694; }
+/* 新引擎那一侧的缩放：MapLibre 自带的 ＋－ 在这条路径上根本不存在，所以补一对，样式跟着控制条走。 */
+.view-controls .zoom-controls { display: flex; gap: 3px; }
+.view-controls .zoom-step { padding: 12px 11px; font: 13px/1 var(--mono); }
+/* 边界那一行只在 `?engine=three` 那一侧出现。可换行、限宽、居中：不换行会在窄屏上把页面横向撑开。 */
+.engine-note { position: absolute; z-index: 1; bottom: 9px; left: 56%; transform: translateX(-50%); margin: 0; max-width: min(72vw, 560px); font-size: 9px; line-height: 1.35; text-align: center; color: #819694; }
+/* 诊断面板是一行 nowrap 的长文本（1440 下 812 px），窄屏上本来就溢出视口；它一占底部，边界那一行就没地方放。
+   1000 px 以下收掉它——那一档用户要看得见的是"这一侧缺什么"，不是 fps。浏览器判据都跑在 1440 上，不受影响。 */
+@media (max-width: 1000px) { .engine-stats { display: none; } }
 .poi-panel { position: absolute; z-index: 4; right: 34px; top: 82px; width: 320px; max-height: calc(100dvh - 210px); display: flex; flex-direction: column; background: #f8fbfaf5; border: 1px solid white; border-radius: 11px; box-shadow: 0 8px 35px #20494d1a; padding: 22px 14px 0; }
 .poi-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 7px; }
 .poi-heading .eyebrow { font-size: 8px; margin-bottom: 9px; }
@@ -201,7 +209,7 @@ body[data-search='open'] .scene-intro { display: none; }
 .osm-link { color: var(--accent); text-decoration: none; display: inline-block; border-bottom: 1px solid #c4d2bd; font-size: 11px; padding: 2px 0; }
 .poi-source { display: block; color: #91a29b; font-size: 9px; margin-top: 9px; }
 body:not([data-atmosphere='day']) :is(h1, .poi-card h3) { color: var(--ink); }
-body:not([data-atmosphere='day']) :is(.edition, .edition span, .eyebrow, .intro-copy, .scene-range, .key-title > span, .legend, [id='building-note'], .gesture-hint, .gesture-hint span, .scene-coordinate, .poi-heading h2 span, .close-button, .poi-status, .poi-text small, .poi-distance, .panel-note, .search-label, .search-status, .search-option small, .maplibregl-popup-close-button, .poi-address, .poi-hours, .building-fact, .building-name-en, .poi-source) { color: var(--muted); }
+body:not([data-atmosphere='day']) :is(.edition, .edition span, .eyebrow, .intro-copy, .scene-range, .key-title > span, .legend, [id='building-note'], .gesture-hint, .gesture-hint span, .scene-coordinate, .engine-note, .poi-heading h2 span, .close-button, .poi-status, .poi-text small, .poi-distance, .panel-note, .search-label, .search-status, .search-option small, .maplibregl-popup-close-button, .poi-address, .poi-hours, .building-fact, .building-name-en, .poi-source) { color: var(--muted); }
 body:not([data-atmosphere='day']) :is(.button, .view-controls, .poi-panel, .search-panel, .map-message, .edition) { background: var(--paper); border-color: var(--line); }
 body:not([data-atmosphere='day']) .button[aria-expanded='true'] { background: var(--accent); color: var(--page); border-color: var(--accent); }
 body:not([data-atmosphere='day']) :is(.view-controls button[aria-pressed='true'], .category-filters button[aria-pressed='true'], .search-option[chosen]) { background: var(--selected); color: var(--accent); }

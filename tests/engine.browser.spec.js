@@ -1030,3 +1030,57 @@ test('the new engine blooms its night lamps without veiling the frame', async ({
   expect((await page.evaluate(() => window.__probe.n.bloomState())).share, '切回白昼泛光没归零').toBe(0);
   expect(errors).toEqual([]);
 });
+
+// 页面外项 10：这一侧缺什么要写在界面上，灰着的按钮要各带一句理由，缩放要有按钮。
+// 原来 `?engine=three` 只点亮六个控件，其余灰着且页面不说为什么（用户 2026-10-10 点名的那一格）；
+// 而"放大/缩小"那对按钮是 MapLibre 自带的控件，这一侧根本没有 MapLibre，所以不是灰着，是不存在。
+test('the new engine says what it cannot do, and still has a zoom button', async ({ page }) => {
+  test.setTimeout(180000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const { VIEW_LIMITS } = await import('../src/config.js');
+  await openEngine(page, 'three');
+  const ui = await page.evaluate(() => ({
+    zoomers: [...document.querySelectorAll('#view-controls .zoom-step')].map((button) => ({
+      label: button.getAttribute('aria-label'), disabled: button.disabled,
+    })),
+    note: document.querySelector('.engine-note')?.textContent ?? '',
+    hint: document.getElementById('gesture-hint').textContent.replace(/\s+/g, ' '),
+    greyed: [...document.querySelectorAll('#view-controls button[disabled], #places-toggle, #search-toggle, #tour-start, .scene-key button')]
+      .map((button) => ({ id: button.id || button.className, title: button.title })),
+  }));
+  expect(ui.zoomers.map((button) => button.label), '缩放按钮没补齐或标签不对').toEqual(['放大一级', '缩小一级']);
+  expect(ui.zoomers.every((button) => !button.disabled), '缩放按钮在引擎这一侧还是灰的').toBe(true);
+  expect(ui.greyed.length, `该灰着的控件数变了：${JSON.stringify(ui.greyed.map((row) => row.id))}`).toBeGreaterThanOrEqual(5);
+  const mute = ui.greyed.filter((row) => !row.title);
+  expect(mute, `这些控件灰着但页面不给理由：${JSON.stringify(mute)}`).toEqual([]);
+  // 手势那一行不许承诺这一侧做不到的事（"点击楼块查看"在新引擎里是不成立的）。
+  expect(ui.hint, `手势提示还在说这一侧做不到的事：${ui.hint}`).not.toContain('点击楼块');
+  expect(ui.note, '边界那一行没点名还缺什么整块能力').toMatch(/塔身|桥|检索|导览/);
+  // 一次点击 = 一级，并且受限幅夹住（夹在相机里，不在按钮上）。
+  const zoomOf = () => page.evaluate(() => Number(location.hash.split('/')[0].replace('#map=', '')));
+  const start = await zoomOf();
+  await page.locator('.zoom-step', { hasText: '＋' }).click();
+  await page.waitForTimeout(1600);
+  expect(Math.abs((await zoomOf()) - start - 1), `点一次 ＋ 只走了 ${(await zoomOf()) - start} 级`).toBeLessThan(0.05);
+  for (let i = 0; i < 14; i++) await page.locator('.zoom-step', { hasText: '＋' }).click();
+  await page.waitForTimeout(2600);
+  expect(await zoomOf(), `连点 14 次 ＋ 冲到了 ${await zoomOf()} 级，限幅没夹住`).toBeLessThanOrEqual(VIEW_LIMITS.maxZoom + 1e-6);
+  // 窄屏：那一行边界说明不许把页面横向撑开，也不许压住控制条（控制条在 25% 死区里本来会淡出，所以量的是它）。
+  for (const width of [720, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(900);
+    const box = await page.evaluate(() => {
+      const note = document.querySelector('.engine-note')?.getBoundingClientRect();
+      const bar = document.querySelector('#view-controls')?.getBoundingClientRect();
+      return { hscroll: document.documentElement.scrollWidth > innerWidth,
+        noteBottom: note ? Math.round(note.bottom) : null, barTop: bar ? Math.round(bar.top) : null,
+        noteLeft: note ? Math.round(note.left) : null, noteRight: note ? Math.round(note.right) : null, innerWidth };
+    });
+    expect(box.hscroll, `${width} px 上页面被横向撑开了`).toBe(false);
+    expect(box.noteLeft, `${width} px 上那一行超出左边`).toBeGreaterThanOrEqual(0);
+    expect(box.noteRight, `${width} px 上那一行超出右边`).toBeLessThanOrEqual(box.innerWidth);
+    expect(box.noteBottom - box.barTop, `${width} px 上那一行与控制条重叠（${box.noteBottom} vs ${box.barTop}）`).toBeGreaterThan(0);
+  }
+  expect(errors).toEqual([]);
+});
