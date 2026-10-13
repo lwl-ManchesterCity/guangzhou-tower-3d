@@ -466,6 +466,41 @@ Chrome另做实际鼠标点选：桌面三主题及390／320／568三种小屏�
 
 **撤销。** ① 删 `src/engine/bloom.js`；② `src/engine/scene.js`：删 `createBloom` 的 import、`bloom`/`bloomShare`/`nightNow`/`setBloomShare`/`ensureBloom`/`sync` 那一块、`resize` 里的 `bloom?.setSize`、`renderer.info.autoReset = false` 与帧首的 `renderer.info.reset()`（还原成默认自动清零）、`frame` 里那句 `if (nightNow()) … else`（改回一句 `renderer.render`）、`setMode` 里的 `setBloomShare`、API 里 `counts()` 的 `bloom` 一格与 `setBloom`/`bloomState` 两个阀门、`dispose` 里的 `bloom?.dispose()`；③ `tests/engine.browser.spec.js`：删 `blooms its night lamps…` 那一项，"八层各一发"改回跨档比 `night.trafficFree − day.trafficFree = 8`（并删掉同档藏八层那一段与 `[-6,-6,5]` 的教训注释），"灯火开合 <15 %"那一对去掉先关泛光/后开满档的两笔；④ 删 `docs/screenshots/canton-bloom-*.png` 与 `scripts/{probe-bloom-engine,probe-bloom-cost,probe-bloom-control,shot-bloom}.mjs`；⑤ 删本节。**现版那一侧、样式图层、数据快照与亮度档表本轮一字未动。**
 
+### 页面外那四项：仓库有了基线、引擎把边界写在界面上、一条快子集、拆场景把资源还回去（2026-10-13～14，优化清单页面外第 8／10／11 项与遗留 #177）
+
+页面内 1／2／3／5／6／7 做完之后接着做页面外这一批。四项的共同点是**都不改画面**：一份版本控制、一句界面说明、一条命令口径、一次 teardown 还账。
+
+**① 第 8 项：`git init` 与基线提交。** 此前这个目录没有版本控制，撤销全靠 `backup/` 与 `candidates/` 里手抄的副本。现在两个提交：`91d65ee` 基线（615 个文件、1,652,339 行，页面内 1／2／3／5／6 都在里面），`9bfb820` 项 10 那一对缩放按钮。`.gitignore` 定的是三条规矩：装出来的与跑出来的（`node_modules/`、`dist*/`、`test-results/`、`playwright-report/`）一律不进；`shots/`（一次性取证截图 23 MB）不进，**要留在文档里的图一律落 `docs/screenshots/`**，那里是入库的；`.env*` 不进、只留 `.env.example`——高德 key 只存在于 `.env.local` 那一格。核对：`git ls-files` 里 `env`／`key`／`secret` **零命中**，被忽略的路径 7 条，入库最大的两份是 `data/canton-tower-buildings-5000m.json` 与它在 `backup/pre-p0/` 的那一份副本（各 7.4 MB），`.git` 242 MB。身份不写进仓库配置，每次提交现给 `-c user.name=… -c user.email=…`。**没有 remote、没有 push、发布未触碰。**
+
+**② 第 10 项：新引擎那一侧把"还缺什么"写到界面上，并把缩放按钮接上。** 两处不对：灰着的控件不给理由（`#places-toggle`、`#search-toggle`、`#tour-start` 与场景快捷键各灰着但页面上一字不说），而手势那一行还写着"点击楼块查看"——这一侧没有点击命中。现在每个灰控件各带一句 `title`，`#gesture-hint` 去掉那句承诺，另起一行 `.engine-note`：「新引擎预览：地面、楼块与近场车流已接；塔身、桥、树、点击出卡片、检索与导览还没过来。」同时把 ＋／－ 补进 `#view-controls`（`stepZoom(±1)` 交给 `setView`，限幅仍在相机那侧的 `clampZoom`，读 `VIEW_LIMITS`：10～18.5）。判据钉三件事：一次点击正好一级（`|Δzoom − 1| < 0.05`）、连点 14 次不会越过 18.5、720 与 375 两档窄屏上那一行既不横向撑页也不压住控制条。截图：[新引擎那一侧的控制条](docs/screenshots/engine-controls-1440.png)。
+
+**③ 第 11 项：`npm run test:smoke`。** 整套 77 条要 40 分钟上下，改一行代码等不起。快子集挑的是"页面起得起、两条渲染路径的主线还在"那 5 条：现版近场那一条（车、人、半径）＋引擎那四条（挂载与全量楼块、近场与交叉淡、夜景泛光、边界说明与缩放按钮）。实测 **5 通过／1.9 分钟**（`--workers=1`）。这一条本轮量过两次，第一次撞上机器被别的东西压着、同样 5 条跑了 **18 分钟**——所以 1.9 分钟是这台机器安静时的口径，不是"这条命令保证 2 分钟"，判据里没有时长门槛，别拿它当门槛读。
+
+**④ #177：拆场景时把几何、材质与贴图还回去。** 盘点办法不是读代码猜谁漏了，是把台账列出来：遍历 `scene`，每个 `geometry`／`material`／挂在材质上的贴图各点一次名、挂一个 `dispose` 监听，喊一次 `dispose()` 之后看谁没响（`scripts/probe-teardown-engine.mjs`，白昼与夜景各跑一遍）。出厂机位那一帧的台账是 **68 样：28 几何／30 材质／10 贴图**。修之前漏三处，全是"没人喊"：
+
+- **近场那三组与楼根接地带整批没还**（#177 原本那一格）。`src/engine/scene.js` 的 `dispose()` 只收自己那五块（`rig`/`ground`/`buildings`/`facades`/两张图集贴图），而车、人、船、湿线、灯那几组是调用方建好喂进来的客人。各家的底细不一样：**车那一组根本没有 `dispose`**，**船那组只有两句、还了两块几何**（材质与组里的节点都没还），灯／湿线／楼根带三家早就备着完整的一句，但装配器那层没有口令，引擎这一侧也就没人喊它们。现在各组自己还清、还清之后把组里的节点摘干净，装配器（`src/near-field.js`）一个口令喊三声，引擎的 `dispose` 只喊装配器与接地带。注入这一条抓出 **24 样没还**。
+- **灯火与光晕那两份材质**。四个桶共用同一份材质，所以 `buildings.dispose()` 的名单里没有它们（它只还自己 `materials` 那一批），造它们的是 `scene.js`——还也由 `scene.js` 喊。注入抓出 2 样。
+- **车灯那颗光晕贴图**。`traffic-life.js` 的 dispose 里原本就写着"调用方造的共用贴图不归这层收"，这条归属规矩没变；变的是造它的那一方（`src/engine/boot.js`）以前 `trafficSprite()` 造完就丢进参数里，没人留着还。现在把它提成一个 `const`，在引擎的 `dispose` 包装里还掉。注入抓出 1 样。
+
+现在白昼与夜景都是 **68／68 全还**。判据三条：Node 两条（`tests/near-field.test.js`）——一条钉装配器那一份台账（≥20 样几何/材质/贴图**全部**响应 `dispose` ＋三组 children 归零），一条钉**没有路网的那一侧照样能拆**（景泰那侧三组里有 null，喊口令不许报错）；浏览器一条（`the new engine gives back every geometry, material and texture it made`）钉整张台账——按最近的有名祖先归类，所以报红当场就点名漏的是哪一组（`{"water-boats":{"total":2,"missed":2}}` 这种形状），并且钉四组节点拆完为空。注入 **Node 侧 14 条 + 浏览器侧 9 条，全部被抓到**；其中"不喊船的 dispose"报 4 样、"不喊楼根接地带"报 3 样、"车那一组拆完不清空"报 `{"traffic-life":6,…}`。
+
+**已知边界**：① bloom 那两块离屏缓冲**不在这份台账里**——它们不是场景节点，遍历 `scene` 碰不到，这一格只钉了"`dispose` 里那句 `bloom?.dispose()` 在"，没有钉它真的把缓冲还了；要钉它得给合成器的 `renderTarget` 开一个读数口，本轮不开。② 现版那一侧仍靠 `tower.js` 的 `onRemove` 遍历整个场景兜住，本轮没动它——两侧现在共用同一份装配器 dispose，但那侧的兜底路径留着不吃亏。③ 台账的 68 样是**出厂机位、白昼与夜景同一份**，换场景（景泰那侧没有近场）数字不同，判据因此钉的是"漏 0 样"与三组归类，不是 68 这个数本身（28／30／10 的分项只在这条用例里作为"台账非空"的证据出现）。
+
+**本轮的数。** Node **675 项全绿**（泛光那一项收口时 673 → #177 加两条 teardown 判据）；`npm run test:smoke` **5 通过／1.9 分钟**；浏览器这一册新增那一条 `gives back every geometry…` 在整套里跑 **856 ms** 通过。
+
+- **整套 77 条：第一遍 71 通过／4 红／2 明确 `skip`，跑了 1.3 小时。** 四条红**没有一条是判据失败**：三条是 120~150 s 的超时卡在"点完按钮等画面"那一步（横屏手机、氛围切换、空气透视——分别耗到 15.3／15.4／8.2 分钟才被杀，杀在 `page.screenshot` 等字体、`keyboard.press`、`moodSettled` 这些等待点上），第四条（塔身夜景那一项）报的是 `Target crashed`，渲染进程被系统收走。**成因与 10-10 那批 11 条红是同一个形状**：那一遍 `mediaanalysisd` 与 `mds_stores` 在跑、load average 5~6。机器安静下来（load 2.6）单跑那四条：**4 通过／4.7 分钟**（10.5 s／1.7 m／1.4 m／1.3 m）。所以这一遍的账是**等价于 75 通过／0 红／2 `skip`**；**"一遍跑完 0 红"的整套记录这台机器上还没有**——超时与门槛一个字没放宽。
+- **`npm run build` 通过**，Vite 口径：`index` 134.90 kB（gzip 50.78）、`landmarks` 48.43（20.45）、`boot` 26.18（10.95）、`three` 619.77（154.99）、`maplibre` 1,038.85（280.06）、`index.css` 33.97（7.50）。与 10-10 那次收口的 build 比是**三批一起的账**（项 6、项 7、本批页面外四项）：`three` **+21.1 kB** 点名是泛光那条链（`UnrealBloomPass` 落在这个块里，**不是本批付的**）、`landmarks` **+7.1 kB** 是项 6 的灯与停止线几何（`signal-poles` 在这个块里）、`index` +1.47 kB 与 `boot` +1.74 kB 才是本批那两项的（`zoom-step`／`engine-note` 落在 `index`）；`maplibre` 一字未动。500 kB 以上的提示仍是 `maplibre-gl-worker` 与 `three` 那两块既有大小。
+- **产物隐私扫描**（`scripts/scan-dist.mjs`）：`dist` 25 个文件，按 `.env.local` 里的 `AMAP_KEY` **逐字节比对零命中**，`restapi.amap`／`jingtai-amap`／`/local/`／`127.0.0.1`／`localhost` 各 0；32 位十六进制串 1 条（`d356f487…`），出处仍是 `dist/data/jingtai-metadata.json` 的 `footprintMerge.source.archiveMd5`，与上一轮同一处，不是凭据。
+- **发布未触碰**：无 remote、无 push、无部署。
+
+**撤销。** 按项各自独立，可以单撤：
+1. **第 8 项（git）**：`rm -rf .git` 就回到"没有版本控制"那一天；`.gitignore` 删掉即可，`backup/`、`candidates/`、`dist-p1merge/` 本来就在原位没动。
+2. **第 10 项**：`src/main.js` 删引擎分支里的 `engineNote`/`stepZoom`/`zoomGroup` 三块与那句 `for (const button …) button.title = …`，`index.html` 的 `#gesture-hint` 文案改回原来那句，`src/style.css` 删 `.zoom-controls`/`.zoom-step`/`.engine-note` 三条与夜景 muted 色里那一个选择器、删 1000 px 那条 `.engine-stats { display: none; }`，`tests/engine.browser.spec.js` 删 `says what it cannot do, and still has a zoom button` 那一项，删 `docs/screenshots/engine-controls-1440.png` 与 `scripts/{probe-engine-controls,shot-engine-controls}.mjs`。
+3. **第 11 项**：`package.json` 删 `test:smoke` 那一行。
+4. **#177**：`src/traffic-life.js`、`src/waterlife.js`、`src/shadow-pads.js` 各删 `dispose()`（装配器与楼根带那两处保留原有那一份）、`src/near-field.js` 删装配器的 `dispose()`、`src/engine/scene.js` 删 `nearField?.dispose()`/`bases?.dispose?.()`/那两行材质归还、`src/engine/boot.js` 还原 `sprite` 那两格（inline 回参数、去掉 `sprite?.dispose()`），`tests/near-field.test.js` 删两条 teardown 判据、`tests/engine.browser.spec.js` 删 `gives back every geometry…` 那一项，删 `scripts/{inject-teardown,inject-teardown-browser,probe-teardown-engine}.mjs`。
+
+**数据快照、样式图层（`src/style.js`/`src/map.js` 的图层定义）与现版那侧的画面本轮一字未动。**
+
 ### 这一批（页面内 1／2／3／5）的收口记录（2026-10-10）
 
 
