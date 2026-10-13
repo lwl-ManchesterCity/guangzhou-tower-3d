@@ -245,9 +245,13 @@ export function createWaterLife({ features = [], origin, radius = BOAT_LIFE_RADI
     parts() {
       return { hulls: { instances: hulls.count, visible: hulls.visible }, lights: { visible: lights.visible, opacity: lights.material.opacity }, lit, clock };
     },
+    // teardown：几何、材质、组里的节点，三样都要还。少一样就是引擎那句 `dispose()` 谈不成"没漏"（#177）。
     dispose() {
       hull.dispose();
       strip.dispose();
+      hulls.material.dispose();
+      lights.material.dispose();
+      group.clear();
     },
   };
 }

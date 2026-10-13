@@ -28,10 +28,11 @@ export function createNearField({ streets = [], river = [], shore = [], origin, 
   // 近岸那一圈湿线：静态，但它站的是同一批水面多边形（`shore`），所以跟着近场一起挂、一起被透视镜收走。
   // 组名既不叫 `traffic-life` 也不叫 `water-life`——浏览器那条数发数的判据按名字藏组，多出来的这一组自己结自己的账。
   const wet = shore.length ? createShoreBand({ features: shore, origin }) : null;
+  // 逐组交出去，谁没造出来就少一组：两边的场景都只做一句 `scene.add(...groups)`。
+  const groups = [traffic?.group, boats?.group, wet?.group].filter(Boolean);
 
   return {
-    // 逐组交出去，谁没造出来就少一组：两边的场景都只做一句 `scene.add(...groups)`。
-    groups: [traffic?.group, boats?.group, wet?.group].filter(Boolean),
+    groups,
     counts: { cars: traffic?.counts.cars ?? 0, walkers: traffic?.counts.walkers ?? 0, boats: boats?.counts.boats ?? 0 },
     /** 湿线那一层的账（几圈、几圈被水面宽度闸门拒掉），判据与 README 读这一格。 */
     shoreBand: wet?.report ?? null,
@@ -60,6 +61,16 @@ export function createNearField({ streets = [], river = [], shore = [], origin, 
       traffic?.setVisible(on);
       boats?.setVisible(on);
       wet?.setShown(on);
+    },
+    /**
+     * teardown：一个口令把这三组自己造的几何与材质全还掉（#177）。
+     * 现版那侧靠 `tower.js` 的 `onRemove` 遍历整个场景兜住，新引擎那侧此前只收了自己那几块——
+     * 两边都改成喊这里，才不必再靠"谁记得遍历一遍"。组里的节点由各组自己清（判据钉的就是这一条）。
+     */
+    dispose() {
+      traffic?.dispose();
+      boats?.dispose();
+      wet?.dispose();
     },
     /** 面板与判据看的那一份读数。两边同形，判据才能把同一秒的同一格在两引擎各读一次来对。 */
     readout() {

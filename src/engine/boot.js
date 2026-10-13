@@ -36,8 +36,10 @@ export async function bootThreeEngine({ container, base = '/data/', onError, sce
   const river = (entries.find(([key]) => key === 'river') ?? [])[1] ?? [];
   // 岸线用同一批 `water` 面，所以船的横向游移在窄的那条汊里会被夹回到水里。
   const shore = (entries.find(([key]) => key === 'water') ?? [])[1] ?? [];
+  // 那颗光晕贴图由这里造、也由这里还：`traffic-life.js` 的 dispose 只管自己那批几何与材质，共用贴图归建它的那一方。
+  const sprite = sceneId === 'canton' ? trafficSprite() : null;
   const nearField = sceneId === 'canton'
-    ? createNearField({ streets, river, shore, origin: SCENE.center ?? DEFAULT_CENTER, sprite: trafficSprite() })
+    ? createNearField({ streets, river, shore, origin: SCENE.center ?? DEFAULT_CENTER, sprite })
     : null;
   // 楼根那一圈接地带：与现版共用 `src/shadow-pads.js`，所以两边的画面在这一格上是同一片影、同一个门控。
   // 学校那侧仍然不给——它的画面是靠"一块色一个高度档"那套沙盘读法成立的（景泰那几轮判据按此校准），
@@ -51,6 +53,7 @@ export async function bootThreeEngine({ container, base = '/data/', onError, sce
   engine.dispose = () => {
     gesture.dispose();
     dispose();
+    sprite?.dispose();
   };
   // The shipped buttons call these names, so the engine answers to them rather than making the UI learn a second
   // vocabulary mid-migration.

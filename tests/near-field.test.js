@@ -189,6 +189,41 @@ test('没有江的那一侧照样装得出来，船那三格报 0 而不是把�
   assert.ok(seen.cars > 0 && seen.reach > 0, '少了船，车的那一份读数跟着空了');
 });
 
+test('teardown 一个口令把这三组的几何、材质与贴图都还掉（#177）', () => {
+  const near = asLegacy();
+  const owned = { geometry: new Set(), material: new Set(), map: new Set() };
+  for (const group of near.groups) group.traverse((object) => {
+    if (object.geometry) owned.geometry.add(object.geometry);
+    if (object.material) {
+      owned.material.add(object.material);
+      if (object.material.map) owned.map.add(object.material.map);
+    }
+  });
+  const fired = new Set();
+  for (const list of Object.values(owned)) {
+    for (const item of list) item.addEventListener('dispose', () => fired.add(item));
+  }
+  const total = owned.geometry.size + owned.material.size + owned.map.size;
+  // 车/灯面/光点/人/贴片/灯三层/船两层/湿线：这一格钉的是"fixture 真的把三组装齐了"，不是资源数本身。
+  assert.ok(total >= 20, `这一场只数到 ${total} 份资源，三组没装齐（组：${near.groups.map((g) => g.name).join(',')}）`);
+  near.dispose();
+  const missed = Object.entries(owned).flatMap(([kind, list]) => [...list]
+    .filter((item) => !fired.has(item))
+    .map((item) => `${kind}:${item.type ?? item.constructor.name}`));
+  assert.deepEqual(missed, [], `teardown 漏还了 ${missed.length} 份显存：${missed.join(', ')}`);
+  assert.deepEqual(near.groups.map((group) => group.children.length), [0, 0, 0],
+    'dispose 之后组里还留着节点：场景里没有第二个人会替它清');
+});
+
+test('没有路网的那一侧照样能拆，空跑一遍口令不报错', () => {
+  const dry = createNearField({ origin: DEFAULT_CENTER });
+  dry.advance(1, 16.5);
+  dry.setLit(true);
+  dry.setVisible(false);
+  dry.dispose();
+  assert.deepEqual(dry.groups, [], '没有路网就不该有任何组');
+});
+
 test('哪一组都造不出来时报 null，与景泰那侧同一个形状', () => {
   const empty = createNearField({ origin: DEFAULT_CENTER });
   assert.equal(empty.readout(), null, '没有路网就没有近场，读数必须是 null 而不是半空的一格');

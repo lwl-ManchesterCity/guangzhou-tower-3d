@@ -1084,3 +1084,80 @@ test('the new engine says what it cannot do, and still has a zoom button', async
   }
   expect(errors).toEqual([]);
 });
+
+test('the new engine gives back every geometry, material and texture it made', async ({ page }) => {
+  test.setTimeout(200000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+  await openEngine(page, 'three');
+  await page.evaluate(async () => {
+    const { neighborhood: n } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    window.__probe = { n };
+  });
+  // 先证明这一页真的有近场：没有车、没有船的话，下面那份台账就只是在一堆空数组上永真。
+  const live = await page.evaluate(() => window.__probe.n.nearTraffic());
+  expect([live.cars, live.walkers, live.boats], `近场没装配，这条判据量的是空场景：${JSON.stringify(live)}`)
+    .toEqual([1298, 1244, 18]);
+  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（28 几何 + 30 材质 + 10 贴图 = 68 样，
+  // 2026-10-14 实测，`scripts/probe-teardown-engine.mjs`）。
+  const census = await page.evaluate(() => {
+    const rows = [];
+    const seen = new Set();
+    const owner = (object) => { for (let node = object; node; node = node.parent) if (node.name) return node.name; return '(unnamed)'; };
+    const add = (item, kind, object) => {
+      if (!item || seen.has(item)) return;
+      seen.add(item);
+      const ordinal = rows.length;
+      rows.push({ kind, owner: owner(object), fired: false });
+      item.addEventListener('dispose', () => { rows[ordinal].fired = true; });
+    };
+    window.__probe.n.scene.traverse((object) => {
+      add(object.geometry, 'geometry', object);
+      for (const material of [].concat(object.material ?? [])) {
+        add(material, 'material', object);
+        for (const value of Object.values(material)) if (value && value.isTexture) add(value, 'texture', object);
+      }
+    });
+    window.__ledger = rows;
+    const named = {};
+    window.__probe.n.scene.traverse((object) => { if (object.name && object.isObject3D && !named[object.name]) named[object.name] = object; });
+    window.__groups = Object.fromEntries(['traffic-life', 'water-life', 'shore-wet', 'building-bases-group']
+      .map((name) => [name, named[name] ?? null]));
+    return { total: rows.length, byKind: rows.reduce((a, r) => { a[r.kind] = (a[r.kind] ?? 0) + 1; return a; }, {}),
+      owners: [...new Set(rows.map((r) => r.owner))].sort(),
+      missingGroups: Object.entries(window.__groups).filter(([, node]) => !node).map(([name]) => name) };
+  });
+  expect(census.byKind, `三样一样都不能缺（几何/材质/贴图）：${JSON.stringify(census.byKind)}`)
+    .toEqual({ geometry: 28, material: 30, texture: 10 });
+  expect(census.missingGroups, `这些组没挂进引擎的场景，"摘干净"那一半就量不到：${JSON.stringify(census.missingGroups)}`)
+    .toEqual([]);
+  // 漏了 #177 的那几组名字必须出现在台账里，否则这条判据量到的可能只是引擎自己那五块。
+  for (const group of ['traffic-cars', 'traffic-lamps', 'traffic-walkers', 'water-boats', 'signal-poles', 'shore-wet-line', 'building-bases']) {
+    expect(census.owners, `台账里没有 ${group}，近场那几组没挂进场景`).toContain(group);
+  }
+  const after = await page.evaluate(() => {
+    window.__probe.n.dispose();
+    const rows = window.__ledger;
+    const tally = {};
+    for (const row of rows) {
+      const cell = (tally[row.owner] ??= { total: 0, missed: 0 });
+      cell.total += 1;
+      if (!row.fired) cell.missed += 1;
+    }
+    return { total: rows.length, fired: rows.filter((r) => r.fired).length,
+      missed: rows.map((r, i) => r.fired ? null : `${r.kind}:${r.owner}`).filter(Boolean),
+      leaky: Object.fromEntries(Object.entries(tally).filter(([, cell]) => cell.missed > 0)),
+      panel: document.querySelector('.engine-stats') !== null,
+      left: Object.fromEntries(Object.entries(window.__groups).map(([name, node]) => [name, node.children.length])) };
+  });
+  expect(after.leaky, `场景里还挂着 ${after.total} 样，其中 ${after.total - after.fired} 样没还：${JSON.stringify(after.leaky)}`)
+    .toEqual({});
+  expect(after.missed, `dispose 没还掉：${JSON.stringify(after.missed)}`).toEqual([]);
+  // 还了资源不等于摘了节点：`group.clear()` 那一半单独钉，与 Node 侧那条 `[0, 0, 0]` 同一个口径。
+  expect(after.left, `dispose 之后这些组里还留着节点：${JSON.stringify(after.left)}`)
+    .toEqual({ 'traffic-life': 0, 'water-life': 0, 'shore-wet': 0, 'building-bases-group': 0 });
+  expect(after.panel, 'dispose 之后读数面板还留在页面上').toBe(false);
+  // 贴图归造它的那一方还（`boot.js` 那颗光晕、`scene.js` 那两张图集），这里只要求"有人还了"。
+  expect(errors, `拆场景的过程中报了错：${JSON.stringify(errors)}`).toEqual([]);
+});

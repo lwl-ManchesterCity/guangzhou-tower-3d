@@ -628,6 +628,23 @@ export function createTrafficLife({ features, origin, radius = TRAFFIC_LIFE_RADI
     reach() {
       return Math.round(reach);
     },
+    /**
+     * teardown：这一组自己造的几何与材质自己还。
+     * 那颗光晕贴图（`sprite`）是调用方造好递进来的，不归这一层收——两条渲染路径共用它，谁建谁还。
+     * `InstancedMesh.dispose()` 只还实例缓冲，几何与材质要各自点名，所以三样都写。
+     */
+    dispose() {
+      for (const mesh of [vehicles, lamps, people]) {
+        mesh.geometry.dispose();
+        mesh.material.dispose();
+        mesh.dispose();
+      }
+      glowGeometry.dispose();
+      glow.material.dispose();
+      pads.dispose();
+      props?.dispose();
+      group.clear();
+    },
     // 给判据看的一眼：这一组是什么、有多少、灯到不到得了。
     parts() {
       return {

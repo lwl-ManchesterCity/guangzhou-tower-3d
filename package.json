@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
+    "test:smoke": "playwright test tests/browser.spec.js tests/engine.browser.spec.js --workers=1 --reporter=list -g \"the three.js engine mounts behind the switch|the near field puts vehicles on the streets|the new engine drives the near field and cross-fades|the new engine blooms its night lamps|the new engine says what it cannot do\"",
     "test:browser": "playwright test tests/*.spec.js --workers=1 --reporter=list"
   },
   "dependencies": {

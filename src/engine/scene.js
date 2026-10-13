@@ -436,9 +436,15 @@ export function createEngineScene(options) {
       ground.dispose();
       buildings.dispose();
       facades.dispose();
+      // 灯火与光晕那两份材质是这里造、发给四个桶共用的，`buildings.dispose()` 只还它自己那批墙与窗格，所以还由这里喊（#177）。
+      for (const material of lampMaterials) material.dispose();
       lampTexture.dispose();
       glowTexture.dispose();
       labels.dispose();
+      // 近场那几组与楼根接地带是调用方喂进来的客人（`boot.js` 建），但它们自己造的几何与材质得有人喊还——
+      // 以前这里只收了自己那五块，换一次场景就把车、人、船、湿线与灯的三层留在显存里（#177）。
+      nearField?.dispose();
+      bases?.dispose?.();
       bloom?.dispose();
       panel.remove();
       renderer.dispose();
