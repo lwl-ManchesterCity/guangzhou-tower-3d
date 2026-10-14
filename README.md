@@ -466,9 +466,42 @@ Chrome另做实际鼠标点选：桌面三主题及390／320／568三种小屏�
 
 **撤销。** ① 删 `src/engine/bloom.js`；② `src/engine/scene.js`：删 `createBloom` 的 import、`bloom`/`bloomShare`/`nightNow`/`setBloomShare`/`ensureBloom`/`sync` 那一块、`resize` 里的 `bloom?.setSize`、`renderer.info.autoReset = false` 与帧首的 `renderer.info.reset()`（还原成默认自动清零）、`frame` 里那句 `if (nightNow()) … else`（改回一句 `renderer.render`）、`setMode` 里的 `setBloomShare`、API 里 `counts()` 的 `bloom` 一格与 `setBloom`/`bloomState` 两个阀门、`dispose` 里的 `bloom?.dispose()`；③ `tests/engine.browser.spec.js`：删 `blooms its night lamps…` 那一项，"八层各一发"改回跨档比 `night.trafficFree − day.trafficFree = 8`（并删掉同档藏八层那一段与 `[-6,-6,5]` 的教训注释），"灯火开合 <15 %"那一对去掉先关泛光/后开满档的两笔；④ 删 `docs/screenshots/canton-bloom-*.png` 与 `scripts/{probe-bloom-engine,probe-bloom-cost,probe-bloom-control,shot-bloom}.mjs`；⑤ 删本节。**现版那一侧、样式图层、数据快照与亮度档表本轮一字未动。**
 
+### 地标那一整批资产进新引擎：搬的不是几何，是"谁把镜头交给它们"（2026-10-14，#170 收口的那一格 #190）
+
+项 5 剩下的最后一格。现版那侧的广州塔网格、东西塔与省博的壳体、海心桥、塔顶光柱与三塔落水带站在**另一套 `THREE.Scene`** 里，借 MapLibre 的画布与 GL 上下文补画（`src/tower.js:507`），相机是每帧把 MapLibre 算好的投影矩阵左乘一张米制 modelMatrix 塞进一张裸 `THREE.Camera`。这些工厂全是纯函数、Node 里也造得出来，所以**要搬的不是像素也不是算法，只有"谁把镜头交给它们"这一格**：米制原点两边同一个（引擎的 `createProjection` 复用的就是 `geo.plane`），网格因此一字未改。装配在 `src/engine/landmarks.js`，接线在 `scene.js` 的五处（每帧 `update(zoom)`、动效拍 `advance`、停动效 `reset`、换氛围 `setAtmosphere`、拆场景 `dispose`）。
+
+**① 壳体与盒子不能同时画。** 现版那侧是样式里的 `formFilter`，这里写成一次过滤：`underShell` 读的就是 `FORM_OSM_IDS` 那一份名单（同源，不是抄第二遍）。楼块因此从 **3,990 变 3,987**——西塔、东塔、省博那三栋有盒子的让位，海心桥那条本来就不在建筑快照里。面板那一行从此是"… 波光 1 层 / **壳体 4 片** / 江上 18 船 …"。
+
+**② 摘掉这一层的自差（白昼）。** 正好 **−30 发／−121,803 个三角形**，画面差 **22,724 颗像素**、最亮那道边 164 个灰阶；差值像素的包围盒是 (439,5)–(1051,507)，把塔冠投影那一点 (683,181) 装在里面，而面积只占画幅的 22%——判据两头都钉：这一层要画到塔那一片，又不许铺满全幅去改底色。
+
+**③ 夜景闸门。** 光柱与三条落水带只跟着 `forms.nightShare()` 出画：白昼报 `beam: false`、三条带 `[0, 0, 0]` 且 `visible: false`（**有 mesh、不发光**，不是没造出来），夜景给 `[0.55, 0.24, 0.24]`——塔自己那条 0.55、两塔各 0.24，V7 那本账原样搬过来。带子的位置从 `canton-river.geojson` 那条中心线上量（`channelCrossing`），不是手摆的坐标；抽掉中心线就没有带子，壳体照旧四片。
+
+**④ 夜里再摘一次。** **−38 发／−121,975 个三角形**、画面差 29,203 颗——比白昼多出的那 8 发与 172 个三角形就是光柱与三条带，它们白天一发都不发。
+
+**⑤ 色相是一个环，停下交回出厂帧。** 默认档 `single`（整根 shaft 一个色相、40 秒一圈，与现版 `map.js` 那三个数同源）：开动效 3.5 秒走到 0.0875，**塔身那批材质的 `color`/`emissive`/`emissiveIntensity` 跟着变**；停动效之后整层的颜色串与开屏那一份**逐字相同**、读数归 0。
+
+**⑥ 这一层的雾化在它自己手里。** 引擎有 `scene.fog`（1,500–9,000 m），而壳体的墙色是 `recedeColor` 按镜头距离烘进 `material.color` 的——再打一遍就是双重雾化。所以这一层 27 张材质一律 `fog = false`，**摘雾必须放在全部块都挂进来之后**（三条带与光柱是后面才 add 的，先摘就漏掉它们）。
+
+**⑦ 墙色跟着镜头走。** `recede(zoom)` 每帧读引擎自己的 `view.zoom`：15.5 与 13 两档之间壳体的墙色必须变，回到同一档必须逐字相同（`update` 那一行没接上就冻在开屏那一档）。
+
+**⑧ 泛光这一格：地标不吃这条链，参数一个都没动。** 这一格是被判据逼出来的：地标进来之后泛光那一项当场红——那块 900×700 的中位从 30 抬到 **35.7**（预算 4）、多烧掉 **575** 颗像素（预算 40）。归因用"同档藏一层再读一次"：把 `tower-model` 摘掉，烧掉的从 575 掉到 **1**；摘壳体、摘光柱、摘三条带都一动不动。为什么不能给它一个阈值：塔冠**关着泛光**就有 248.6/255（线性 ~0.94），而灯芯要起晕就得把门槛压在 ~0.33 以下——16 格扫参（`scripts/probe-bloom-rescan.mjs`）证明两头没有能分开的数：抬到 0.5 灯芯那颗 900×700 一颗都不晕（303 → 0），抬到 0.8 整幅不晕，留在 0.3 就是塔糊成一团白。现版那侧的塔本来就没有这条链（那一侧只有发光体自带的晕），所以**"地标不进泛光的源"是两边同一张画面**，不是新引擎少给一份效果。做法是链之前把这一层藏起来、链走完留着深度补画一遍（`bloom.js` 的 `overlay`）：塔身该被前面的楼挡住的部分仍然被挡住，`group.visible = false` 在夜景也真管用（补画那一道读的是"这一次用户要它可见"的名单，不是替它开门）。补画有两个坑，都当场撞过：`scene.background` 是一个 Color 时 three 的 `WebGLBackground.render()` 会 `forceClear = true`，那一格不看 `autoClear` 的脸色——不摘就把整幅合成结果擦成天空色、画面只剩地标；灯必须留着，塔身是 `MeshStandardMaterial`，没有光的场景里它渲染成黑的。接完之后：那块 900×700 halo 311／lifted 156,040／blown 0／中位 30→31，而**地标自己画的那 23,607 颗像素**在开/关之间中位被抬 **0**（最坏那 17.9 颗全在透明落水带上，它们底下本来就是会起晕的江面）。对照一句：现版那侧的夜景本来就有 438 颗 ≥250 的像素（`scripts/probe-tower-luma.mjs`），新引擎关着泛光是 0 颗——两边各亮各的，这一格不比像素（#191）。
+
+**画面证据。** [新引擎夜景开屏](docs/screenshots/canton-landmarks-engine-night.png)（四片壳、光柱、三条落水带与泛光同框）与 [同一机位白昼](docs/screenshots/canton-landmarks-engine-day.png)；[白昼把这一层摘掉](docs/screenshots/canton-landmarks-engine-day-off.png) 就是它到底画了什么；[塔冠近景 17.2 级](docs/screenshots/canton-landmarks-engine-tower-night.png)——斜撑与楼层环读得出来，这一格是"地标不吃泛光"的画面证据；[现版那侧同一机位](docs/screenshots/canton-landmarks-legacy-night.png) 作对照（取景差 140×70 px，见 #191）。
+
+**判据与注入。** Node 新增 `tests/engine-landmarks.test.js` **8 项**（让位名单与 `FORM_OSM_IDS` 同源、塔身站在自己脚点上且顶到 600 m、全层 `fog === false`、三条带量自中心线且省博不投光、夜景闸门与每帧重读、色相环绕回出厂格、两顶皇冠 7 s/8 s 错拍、teardown 台账与摘节点）；浏览器新增 `the new engine stands the three landmark shells with their beam and spill bands` 一条七格（①–⑦），泛光那一项补两格（链报"谁被挡在外面"＋这一层自己的像素不被抬），台账补地标那 14 个名字。**注入 23 处逐条对上**：Node 侧 11 条（`scripts/inject-landmarks-node.mjs`）、浏览器侧 12 条（`scripts/inject-landmarks-browser.mjs`），每条先证明文件真被改过、跑完逐字还原，全部被抓到。**一条注入第一版漏网、判据当场被它教了一次**：`advance` 里删掉 `paintTower()` 时整层的颜色串照样在变（两顶皇冠的呼吸也挂在同一拍上），所以"色相进了材质"那一格改成**只读塔身那批材质**，再注入就红了。
+
+**teardown 那本台账因此从 71 样涨到 141 样**（55 几何／58 材质／28 贴图），`landmarks` 进了"拆完必须清空"的组名单。这一层的贴图按"归造它的一方"那一条规矩还：壳体立面图集与塔身那道高度斜坡的 `ladderMap` 都握在材质属性上，所以 dispose 先遍历材质值还图、再还材质、最后还几何并摘节点——注入"少还贴图"那一条抓到 17 样没还，报红点名到 `184738716:crown` 这一级。
+
+**已知边界**：① **广场那层米数地面没跟着进来**（转 #192）：现版那侧它是乘在 MapLibre 那四张花城广场 `fill` 层上的一张乘性贴图，引擎这一侧还没有那四层的对应物，硬搬就是先造一层再乘一层；② 海心桥只搬了桥面与拱肋，`deckHeights` 那条"车要站到桥面顶上"的规则仍不传（现版那侧 `src/bridges.js` 把四座桥都挤成实体，这一侧只有海心桥一座，传进来会让车浮在自己那条平色路带上面）——同一条规则等其余桥体进引擎那天再接，记在 #192；③ 跨引擎不互差像素（#191）；④ 景泰那侧没有 `towerId` 也没有桥面快照，这一整块不存在（`shellFeatures` 就是空数组），那条边界由 Node 的名单判据钉着。
+
+**本轮的数。** Node **693 项全绿**（上一轮 685 ＋ 8）；引擎那一册 **12 项全绿**（3.1 分钟）。整套 **79 条：75 通过／1 红／3 明确 `skip`／37.4 分钟**（`--workers=1`）。那一条红是 `tests/browser.spec.js:1303` 里"点击本身不占时间"那道墙钟门（期望 <100 ms、拿到 136 ms），本轮没有改过现版那侧的任何一行（本轮 `src/` 只动了引擎那四个文件与界面那句边界说明），**单独复跑同一条 2.6 分钟通过**，所以按"整套串行跑到第 24 项那种五分钟浸泡之后的负载"定性，不是回归；三条 `skip` 里两条是景泰那侧等几何的（#34），第三条 `searching a name or an address…` 是外部公共 Overpass 当时报「重新加载地点」，由 `livePlacesOrSkip` 按老口径 skip 并点名。`npm run build` 通过：`boot` 34.18 kB（gzip 13.66，**+3.33**——补画那道 pass 与地标挂载都接在引擎入口这一侧）、`index` 106.52（39.55，−27.19）、`landmarks` 77.23（31.48，**+27.31**）：这一进一出对得上，`tower.js`／`landmark-forms.js` 那批现在两边都要用，Rollup 把它们从应用块挪进了两边共享的那一块；`three` 619.78（154.99）、`maplibre` 1,038.85（280.06）、`index.css` 33.97（7.50）——`three` 那 0.01 kB 是这次直接 import `Pass.js` 多出的一个绑定，`Pass` 本来就在 `EffectComposer` 的传递依赖里，那块代码没有变大。产物隐私扫描 25 个文件按 `.env.local` 那把 key 逐字节零命中，`restapi.amap`／`jingtai-amap`／`/local/`／`127.0.0.1`／`localhost` 各 0；32 位十六进制 1 条仍是 `jingtai-metadata.json` 里那个归档 MD5（东亚轮廓数据集的来源哈希），不是凭据，`data/` 那份高德快照也没进 `dist`。**发布未触碰。**
+
+**撤销。** ① 删 `src/engine/landmarks.js` 与 `tests/engine-landmarks.test.js`；② `src/engine/scene.js`：删 `createLandmarks`/`underShell` 的 import、`shellFeatures`/`bucketFeatures` 那两行（`features` 改回直接吃 `data.buildings`，必要时留着 `pickTallest`）、`landmarks` 那一处构造、`scene.add(landmarks.group)`、帧循环里的 `landmarks?.update`、动效那两格（`advance`/`reset`）、面板那句"壳体 N 片"、`counts()` 的 `landmarks` 一格、`setMode` 里的 `landmarks?.setAtmosphere`、`dispose` 里的 `landmarks?.dispose()`，以及 `createBloom` 那行的 `exclude:`；③ `src/engine/bloom.js`：删 `Pass` 的 import、`overlay` 那一道 pass 与 `pending` 那一格、`createBloom` 的 `exclude` 参数、`render()` 里包的那两圈可见性、`report()` 的 `excluded` 一格，以及文件头那三段"为什么地标不吃这条链"；④ `src/engine/boot.js`：`ENGINE_LAYERS.canton` 去掉 `bridge: 'haixin-bridge.geojson'`；⑤ `src/main.js`：边界那一行改回"还缺 塔身、壳体与桥…"（`tests/engine.browser.spec.js` 里那条"边界不许说谎"的判据会当场要求改回来）；⑥ `tests/engine.browser.spec.js`：删 `stands the three landmark shells …` 那一项，泛光那一项去掉 `bare` 那一张与 `excluded`/`footprint`/`insideMedian` 三格，台账退回 `{geometry: 29, material: 31, texture: 11}`、组名单去掉 `landmarks`、地标那 14 个名字去掉，"3,987 栋"改回"3,990 栋"、塔脚那一格去掉摘地标那两行；⑦ 删 `docs/screenshots/canton-landmarks-*.png` 与 `scripts/{probe-landmarks-engine,probe-bloom-landmarks,probe-bloom-blame,probe-bloom-rescan,probe-bloom-footprint,probe-tower-luma,shot-bloom-tunes,shot-landmarks-engine,inject-landmarks-node,inject-landmarks-browser}.mjs`；⑧ 删本节。**现版那一侧、样式图层、数据快照与亮度档表本轮一字未动。**
+
 ### 江面那层波光进新引擎：格子还是屏幕的，起点改成了地面的（2026-10-14，#170 剩下的两格里先做的那一格 #189）
 
-项 5 剩下的两格不是动效开关而是资产搬迁：现版的江面是"水色一层 `fill` ＋ 波光一层 `fill-pattern`"，塔身壳体是 `src/tower.js` 里另一套 `THREE.Scene`。这一格先做，因为波光的资产本来就在 `src/water.js`（`waterTexture` 是纯函数，Node 里也造得出来），搬的是**用法**不是像素；壳体那一格仍欠（#190）。
+
+项 5 剩下的两格不是动效开关而是资产搬迁：现版的江面是"水色一层 `fill` ＋ 波光一层 `fill-pattern`"，塔身壳体是 `src/tower.js` 里另一套 `THREE.Scene`。这一格先做，因为波光的资产本来就在 `src/water.js`（`waterTexture` 是纯函数，Node 里也造得出来），搬的是**用法**不是像素；壳体那一格在同一天也接上了（#190，见上面「地标那一整批资产进新引擎」那一节）。
 
 **① 形状照现版。** 新引擎这边是一块与水面**同名单、同几何**的覆盖网格（`src/engine/river.js`）：41 面水系 → 41 块拼成 1 张网格、8,397 个顶点、2,799 个三角形，材质 `MeshBasicMaterial` 不受光、`depthWrite:false`、`DoubleSide`（41 面里有反的环），抬高 0.02 m 坐在水面那一档 0.2 与路带 0.3 之间。名单同源靠同一个 `toneOf`，所以面板报的"水 41"与这一层的 faces 必须是同一个数——一边有河、一边有晕这种错判据直接钉死。
 
@@ -501,7 +534,7 @@ Chrome另做实际鼠标点选：桌面三主题及390／320／568三种小屏�
 
 ### 江面那层波光进新引擎：一块与水面包同几何的覆盖网格（2026-10-14，#170 剩下的两格里先做的那一格）
 
-项 5 剩下的两格不是动效开关而是资产搬迁（#170）。这一轮把**江面波光**那一格做完了（#189），壳体那一格仍欠（#190）。做法不是把现版那套瓦片搬过来，而是**沿用现版的分层形状**：现版的江面是"底下一层 `fill` 出水色、上面一层 `fill-pattern` 只带 alpha 出波光"（分两层是因为 MapLibre 的 `fill-pattern` 会让着色器无视 `fill-color`），新引擎这边就是在水面那块单色板上再压一块**同几何的覆盖网格**，像素仍然出自 `src/water.js` 那三张 `waterTexture`——**改一处两边一起变**，Node 那侧逐字节钉着这份同源。
+项 5 剩下的两格不是动效开关而是资产搬迁（#170）。这一轮把**江面波光**那一格做完了（#189），壳体那一格在同一天做完（#190）。做法不是把现版那套瓦片搬过来，而是**沿用现版的分层形状**：现版的江面是"底下一层 `fill` 出水色、上面一层 `fill-pattern` 只带 alpha 出波光"（分两层是因为 MapLibre 的 `fill-pattern` 会让着色器无视 `fill-color`），新引擎这边就是在水面那块单色板上再压一块**同几何的覆盖网格**，像素仍然出自 `src/water.js` 那三张 `waterTexture`——**改一处两边一起变**，Node 那侧逐字节钉着这份同源。
 
 **① 名单同源，不是又数一遍。** 挑面的判据就是地面那一层用的同一个 `toneOf`：广州塔这一侧 **41 面水系 → 41 块拼成 1 张网格、8,397 个顶点、2,799 个三角形**，抬 0.02 m 坐在水面那一档（0.2 m）之上、路带那一档（0.3 m）之下——爬上路带就是画错，判据把这两头都钉住。面板报的"水 41"与这一层的 faces 必须是同一个数，否则一边有河、一边有晕。
 
@@ -538,7 +571,7 @@ Chrome另做实际鼠标点选：桌面三主题及390／320／568三种小屏�
 
 **① 第 8 项：`git init` 与基线提交。** 此前这个目录没有版本控制，撤销全靠 `backup/` 与 `candidates/` 里手抄的副本。现在两个提交：`91d65ee` 基线（615 个文件、1,652,339 行，页面内 1／2／3／5／6 都在里面），`9bfb820` 项 10 那一对缩放按钮。`.gitignore` 定的是三条规矩：装出来的与跑出来的（`node_modules/`、`dist*/`、`test-results/`、`playwright-report/`）一律不进；`shots/`（一次性取证截图 23 MB）不进，**要留在文档里的图一律落 `docs/screenshots/`**，那里是入库的；`.env*` 不进、只留 `.env.example`——高德 key 只存在于 `.env.local` 那一格。核对：`git ls-files` 里 `env`／`key`／`secret` **零命中**，被忽略的路径 7 条，入库最大的两份是 `data/canton-tower-buildings-5000m.json` 与它在 `backup/pre-p0/` 的那一份副本（各 7.4 MB），`.git` 242 MB。身份不写进仓库配置，每次提交现给 `-c user.name=… -c user.email=…`。**没有 remote、没有 push、发布未触碰。**
 
-**② 第 10 项：新引擎那一侧把"还缺什么"写到界面上，并把缩放按钮接上。** 两处不对：灰着的控件不给理由（`#places-toggle`、`#search-toggle`、`#tour-start` 与场景快捷键各灰着但页面上一字不说），而手势那一行还写着"点击楼块查看"——这一侧没有点击命中。现在每个灰控件各带一句 `title`，`#gesture-hint` 去掉那句承诺，另起一行 `.engine-note`：「新引擎预览：地面、楼块与近场车流已接；塔身、桥、树、点击出卡片、检索与导览还没过来。」同时把 ＋／－ 补进 `#view-controls`（`stepZoom(±1)` 交给 `setView`，限幅仍在相机那侧的 `clampZoom`，读 `VIEW_LIMITS`：10～18.5）。判据钉三件事：一次点击正好一级（`|Δzoom − 1| < 0.05`）、连点 14 次不会越过 18.5、720 与 375 两档窄屏上那一行既不横向撑页也不压住控制条。截图：[新引擎那一侧的控制条](docs/screenshots/engine-controls-1440.png)。
+**② 第 10 项：新引擎那一侧把"还缺什么"写到界面上，并把缩放按钮接上。** 两处不对：灰着的控件不给理由（`#places-toggle`、`#search-toggle`、`#tour-start` 与场景快捷键各灰着但页面上一字不说），而手势那一行还写着"点击楼块查看"——这一侧没有点击命中。现在每个灰控件各带一句 `title`，`#gesture-hint` 去掉那句承诺，另起一行 `.engine-note`：「新引擎预览：地面、楼块与近场车流已接；塔身、桥、树、点击出卡片、检索与导览还没过来。」（**这句话本轮被 #190 改过一次**：壳体与桥进这一侧之后界面写成了「已接 地面、楼块、近场车流、三塔壳体与桥；还缺 树、广场地面、点击出卡片、检索与导览。」，判据见 `tests/engine.browser.spec.js` 里"边界那一行不许说谎"那三格）同时把 ＋／－ 补进 `#view-controls`（`stepZoom(±1)` 交给 `setView`，限幅仍在相机那侧的 `clampZoom`，读 `VIEW_LIMITS`：10～18.5）。判据钉三件事：一次点击正好一级（`|Δzoom − 1| < 0.05`）、连点 14 次不会越过 18.5、720 与 375 两档窄屏上那一行既不横向撑页也不压住控制条。截图：[新引擎那一侧的控制条](docs/screenshots/engine-controls-1440.png)。
 
 **③ 第 11 项：`npm run test:smoke`。** 整套 77 条要 40 分钟上下，改一行代码等不起。快子集挑的是"页面起得起、两条渲染路径的主线还在"那 5 条：现版近场那一条（车、人、半径）＋引擎那四条（挂载与全量楼块、近场与交叉淡、夜景泛光、边界说明与缩放按钮）。实测 **5 通过／1.9 分钟**（`--workers=1`）。这一条本轮量过两次，第一次撞上机器被别的东西压着、同样 5 条跑了 **18 分钟**——所以 1.9 分钟是这台机器安静时的口径，不是"这条命令保证 2 分钟"，判据里没有时长门槛，别拿它当门槛读。
 
@@ -893,7 +926,7 @@ Node 新增 19 项（`tests/engine.test.js`，不开浏览器）：投影与 `pl
 
 **注入三处，三处都咬到。** ① 把 `setFacade` 里的 `wanted` 恒置 `true` → `白昼有点亮的灯火层：[4, 4]`；② 把逐楼格号写死成 `{col: 0, row: 0}` → `public 的楼少了格号：["0,1", "2,1", "3,2", …]`（缺的格直接打出来）；③ 把 `LAMP_OPACITY_STOPS` 整条压成 0（层还在提交、只是全透明）→ `灯火最亮的那处只把像素推动 182，不像加色层`。③ 值得记：它没有把 `movedShare` 打下去，因为光晕那一层还活着——**"整幅变了多少"证明不了某一层在画，峰值才证明**，所以两条判据都得留。
 
-**还欠的，以及一条不能再往前用的判据。** ①**换窗交叉淡（第 2 组 `set` 与"城市呼吸"）当时没进图集**：`lampAtlasImage` 只画 `set 0`，现版那侧的两组轮换与零星明灭在引擎里没有承载——这一格已在 2026-10-07 接上（图集 9 列变 18 列、新增逐顶点 `aLampBits`），见第 13 节。②新引擎夜景仍缺塔身壳体发光与江面波光（车流与行人在同一批接上了；**江面波光那一格已在 2026-10-14 接上，见「江面那层波光进新引擎」那一节，壳体仍欠＝#190**），所以**"整幅画面与现版逐字节／按亮度分布比对"这一类闸门在新引擎夜景上还不成立**：同一机位实测新引擎夜景中位 27／p99 131.7／>120 的像素 4,032 个，现版 34.5／222.6／46,808 个（`node scripts/probe-night-abs.mjs` 出这两个读数）——差的是那些要素，不是这两层，拿它当判据会把"补了窗灯"判成"退步"。这一轮因此全部走**开关同一层的自差**（关掉它少了什么，`probe-night-cells.mjs` 量门控与逐楼格号、`probe-night-delta.mjs` 量整幅差与落到墙上的证据）而不是两引擎互差。③墙面自身光照那一档色差仍在（上一节记的，属 Phase 2 光照那一半）。
+**还欠的，以及一条不能再往前用的判据。** ①**换窗交叉淡（第 2 组 `set` 与"城市呼吸"）当时没进图集**：`lampAtlasImage` 只画 `set 0`，现版那侧的两组轮换与零星明灭在引擎里没有承载——这一格已在 2026-10-07 接上（图集 9 列变 18 列、新增逐顶点 `aLampBits`），见第 13 节。②新引擎夜景仍缺塔身壳体发光与江面波光（车流与行人在同一批接上了；**江面波光与塔身壳体两格都已在 2026-10-14 接上**，见「江面那层波光进新引擎」与「地标那一整批资产进新引擎」那两节（#189 与 #190，#170 至此结清）），所以**"整幅画面与现版逐字节／按亮度分布比对"这一类闸门在新引擎夜景上还不成立**：同一机位实测新引擎夜景中位 27／p99 131.7／>120 的像素 4,032 个，现版 34.5／222.6／46,808 个（`node scripts/probe-night-abs.mjs` 出这两个读数）——差的是那些要素，不是这两层，拿它当判据会把"补了窗灯"判成"退步"。这一轮因此全部走**开关同一层的自差**（关掉它少了什么，`probe-night-cells.mjs` 量门控与逐楼格号、`probe-night-delta.mjs` 量整幅差与落到墙上的证据）而不是两引擎互差。③墙面自身光照那一档色差仍在（上一节记的，属 Phase 2 光照那一半）。
 
 成图（`node scripts/shot-engine-lamp.mjs`）：[夜景整幅 新引擎](docs/screenshots/engine-lamp-full-night-three.png) 对 [夜景整幅 现版](docs/screenshots/engine-lamp-full-night-maplibre.png)、[夜景细部 新引擎](docs/screenshots/engine-lamp-close-night-three.png) 对 [夜景细部 现版](docs/screenshots/engine-lamp-close-night-maplibre.png)。**两对都不是对照物**：地址里同一格机位，现版还带着"让位给面板"的 padding（顶 200／左 280），所以细部框里一边是塔、一边是塔南那排楼；现版那侧另有车流与壳体发光。这两张的用途是"窗与晕进了画面之后读起来像不像一座夜里的城"。
 
@@ -935,7 +968,7 @@ Node 新增 19 项（`tests/engine.test.js`，不开浏览器）：投影与 `pl
 
 **③ 一条踩死的硬限制：three.js 的程序缓存键不看着色器源码。** 亮窗与光晕两张材质的参数**一模一样**（同一份图集配置、同一种加色混合、同样不写深度），只有 `onBeforeCompile` 塞进去的那段片元不同——而 three 拼缓存键只看参数，于是第二个材质直接复用第一个编译好的程序。症状是最难认的那种：**把列偏移从 9 改成 4.5，画面零变化**（不是变暗、不是变花，是一颗像素都不动），交叉淡的第二手压根没上屏。补一句 `material.customProgramCacheKey = () => 'lamp-' + mode`，同一处改动在同一机位动了 **4,175 颗**像素。这条也解释了一次假绿：这一项最早的判据把"一次交叉淡改了多少像素"钉在 `> 800`，而"两手册同一列"那个缺陷实测是 **1,077**——门槛比缺陷值还低，注入照样绿。把三条判据的刻度一次量齐（出厂 2,563／265／163，三种注入分别 1,077／258／128、1,712／**79**／20、7,901／326／**809**），门槛才敢写成现在的 1,500（`moved`）、144（成簇度，沿用现版那把尺）、400（小窗数，新加的"不许全城同闪"上限）。
 
-**④ 剩下两格不是动效，是资产。** 壳体发光与江面波光在引擎里没有承载物：现版那侧的塔身、壳体、落水色带是**另一套 `THREE.Scene` + 共用 MapLibre 画布的 renderer**（`src/tower.js:447`、`487`），皇冠呼吸与壳体发光都挂在那上面；引擎里的江是 `ground-water` 那一块单色板，而现版的滚动是往瓦片里逐行搬像素（`src/water.js` 的 `scrollWater`）。所以这两格要做的是"把地标与水面迁进引擎场景"，动效只是迁完之后顺着同一拍接上的那一半——已单独立项（#170），随 V8 Phase 3，不在本轮硬做。**这一条不改判据也不放宽闸门**：新引擎夜景仍不许拿"与现版整幅逐字节／按亮度分布互差"当判据，理由和第 10 节写的一样。（**2026-10-14 的账面**：这两格里江面波光那一格已做完（#189，见「江面那层波光进新引擎」那一节），壳体那一格转 #190。）
+**④ 剩下两格不是动效，是资产。** 壳体发光与江面波光在引擎里没有承载物：现版那侧的塔身、壳体、落水色带是**另一套 `THREE.Scene` + 共用 MapLibre 画布的 renderer**（`src/tower.js:447`、`487`），皇冠呼吸与壳体发光都挂在那上面；引擎里的江是 `ground-water` 那一块单色板，而现版的滚动是往瓦片里逐行搬像素（`src/water.js` 的 `scrollWater`）。所以这两格要做的是"把地标与水面迁进引擎场景"，动效只是迁完之后顺着同一拍接上的那一半——已单独立项（#170），随 V8 Phase 3，不在本轮硬做。**这一条不改判据也不放宽闸门**：新引擎夜景仍不许拿"与现版整幅逐字节／按亮度分布互差"当判据，理由和第 10 节写的一样。（**2026-10-14 的账面**：这两格都结清了——江面波光见「江面那层波光进新引擎」那一节（#189），壳体见「地标那一整批资产进新引擎」那一节（#190），#170 关闭。）
 
 **⑤ 账目与界面**：draw call 白昼 **17** 发（8 块地面 + 4 墙 + 4 窗格 + 车体一发）、夜景 **28** 发——八层灯火各一发，车流在夜景再多三发（远景光点一发，灯珠 quad **两发**，因为它是双面透明材质，three 正反面各画一遍）。灯火那条判据因此先把车流那一组藏起来量，"八层各一发"这句话才只说灯火。能答话的控件从 3 个变成 4 个：三个氛围按钮之外，动效开关在引擎这一侧也点亮了（它现在真的有东西可开关）。
 

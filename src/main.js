@@ -573,7 +573,7 @@ try {
     for (const key of document.querySelectorAll('.scene-key button')) key.title = '新引擎预览：高度透视镜还没接进这一侧';
     $('gesture-hint').replaceChildren('拖动平移 ', element('span', '', '·'), ' ⌥ 或 右键拖动旋转 ', element('span', '', '·'),
       ' 滚轮或 ＋－ 缩放');
-    const engineNote = element('p', 'engine-note', '新引擎预览：地面、楼块与近场车流已接；塔身、桥、树、点击出卡片、检索与导览还没过来。');
+    const engineNote = element('p', 'engine-note', '新引擎预览：已接 地面、楼块、近场车流、三塔壳体与桥；还缺 树、广场地面、点击出卡片、检索与导览。');
     $('gesture-hint').after(engineNote);
     const stepZoom = (delta) => {
       const view = neighborhood.view();

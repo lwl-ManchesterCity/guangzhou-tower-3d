@@ -60,7 +60,7 @@ async function drag(page, { x = 720, y = 520, dx = 0, dy = 0, alt = false, ctrl 
   return settledHash(page, started);
 }
 
-test('the three.js engine mounts behind the switch, draws the ground and all 3,990 blocks, and keeps the old path', async ({ page }) => {
+test('the three.js engine mounts behind the switch, draws the ground and all 3,987 blocks, and keeps the old path', async ({ page }) => {
   test.setTimeout(240000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -78,7 +78,9 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
   }));
   expect(scene.size, 'the canvas did not take the viewport').toEqual([1440, 960]);
   // Phase 1 后半：全量。面板报的是快照里每一面都立起来了，不是十栋样品。
-  expect(scene.panel, 'the FPS panel does not say what it is grading').toContain('3990 栋');
+  // 3,990 → **3,987**：壳体站在那三块地上（西塔／东塔／省博），盒子必须让位，否则一栋塔两套皮
+  // （#190；现版那侧同一件事是样式里的 `formFilter`）。让位的名单由 `壳体 4 片` 那一格与地标那一项共同钉住。
+  expect(scene.panel, 'the FPS panel does not say what it is grading').toContain('3987 栋');
   // Phase 1 起，面板报的是地面每一档认领了多少面 - 数字来自那三份派生文件，画不上屏就报不出来。
   // `路` 从 504 涨到 2,972：2026-10-05 把 `canton-streets` 的抽取半径从 1 km 提到 2.2 km（花城大道以前根本不在
   // 快照里），晋升后每一档都是整条 way，不再是一公里那一段。
@@ -119,6 +121,9 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
   const spots = await page.evaluate(async () => {
     const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
     const { ATMOSPHERES } = await import('/src/atmosphere.js');
+    // 地标那一层先按名字找出来存好：下面量塔脚那片基底时要把它摘掉（找不到就当场报，别让它静默地不摘）。
+    neighborhood.scene.traverse((object) => { if (object.name === 'landmarks') window.__landmarks = object; });
+    if (!window.__landmarks) throw new Error('地标那一层没挂在引擎的场景上：塔脚那一格摘不出来');
     return {
       channel: neighborhood.screen({ lng: 113.319130, lat: 23.111893, altitude: 0.2 }),
       square: neighborhood.screen({ lng: 113.31921, lat: 23.116, altitude: 0.13 }),
@@ -144,7 +149,12 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
   };
   const channel = await rgbAt(spots.channel, '江心');
   const square = await rgbAt(spots.square, '花城广场');
+  // 塔脚那一点上现在站着塔自己的底座（`createTowerModel` 那圈半径 42~46 m 的 `pale`，实测把那一格压到
+  // 163,175,171），所以量地面之前先把地标那一层摘掉：这一格说的是"地面那层把塔脚那片基底画成 background 色"，
+  // 不是"塔脚那一点看上去一定是 background 色"。摘掉再量，量的还是原来那一格。
+  await page.evaluate(() => { window.__landmarks.visible = false; });
   const foot = await rgbAt(spots.foot, '塔脚');
+  await page.evaluate(() => { window.__landmarks.visible = true; });
   // 地面是不受光的（与 MapLibre 的 fill 同构），所以近处那一格应当就是调色板本身：江心离镜头 260 m、雾还没起，
   // 水色与 `ATMOSPHERES.day.water` 的差必须逐通道在 8 级以内；塔脚那格同理对 `background`。
   const against = (rgb, hex) => rgb.map((value, index) => Math.abs(value - parseInt(hex.slice(1 + index * 2, 3 + index * 2), 16)));
@@ -155,9 +165,9 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
   expect(Math.abs(foot[2] - foot[0]), `塔脚那一格偏蓝 ${foot[2] - foot[0]}（${foot.join(',')}），基底被涂成了水`).toBeLessThan(12);
   expect(spots.calls.ground, `地面只有 ${spots.calls.ground} 块`).toBeGreaterThanOrEqual(7);
   // 文档 Phase 1 的门槛：合并之后 draw call 必须在一百以内。实测 12 个（4 个类别桶 + 8 块地面），
-  // 所以这里同时钉"桶数没有偷偷回到一栋一个"：全量 3,990 面若是一栋一个 Mesh，这一发就是四千个 draw call。
+  // 所以这里同时钉"桶数没有偷偷回到一栋一个"：全量 3,987 面若是一栋一个 Mesh，这一发就是四千个 draw call。
   expect(spots.calls.drawCalls, `合并之后还有 ${spots.calls.drawCalls} 个 draw call`).toBeLessThan(100);
-  expect(spots.calls.buildings, `面板说画了 ${spots.calls.buildings} 栋`).toBe(3990);
+  expect(spots.calls.buildings, `面板说画了 ${spots.calls.buildings} 栋`).toBe(3987);
   expect(spots.calls.triangles, `全量合并之后只有 ${spots.calls.triangles} 个三角，桶大概是空的`).toBeGreaterThan(60000);
 
   // The frame the brief opens on: the hash the old engine writes must come back out of the new camera unchanged.
@@ -548,7 +558,7 @@ test('the new engine lights the night windows with the shipped band ladder', asy
     // 整栋不亮那 1/11（9.1 %）：按顶点数摊下来会偏一些，留 4–15 % 的窗口。实测 7.4–9.0。
     expect(bucket.darkShare, `${bucket.category} 的全暗顶点占 ${bucket.darkShare} %，不像 1/11`).toBeGreaterThan(4);
     expect(bucket.darkShare, `${bucket.category} 的全暗顶点占 ${bucket.darkShare} %，暗得过头了`).toBeLessThan(15);
-    // 最挤的那一格（同一高度档 + 同色温 + 同距离环）占多少顶点：3,990 栋摊到 63 格，实测最大 6~10 %。
+    // 最挤的那一格（同一高度档 + 同色温 + 同距离环）占多少顶点：3,987 栋摊到 63 格，实测最大 6~10 %。
     // 25 % 这一档挡住的是退化情形——"格号没逐楼算、全城共用一格"，那正是现版 V7 抱怨过的"白色大棋盘"。
     expect(bucket.maxPairShare, `${bucket.category} 有 ${bucket.maxPairShare} % 的顶点共用同一格，快糊成一块板了`)
       .toBeLessThan(25);
@@ -987,8 +997,32 @@ test('the new engine blooms its night lamps without veiling the frame', async ({
   const off = await shot(0);
   const on = await shot(1);
   const back = await shot(0);
+  // 地标那一层不吃这条链（#190）：塔冠关着泛光就有 248/255（线性 ~0.94），比任何还能让灯芯起晕的门槛都亮，
+  // 留在链里就是塔把整条链的能量摊到全幅——这块 900×700 的中位抬 5.7、多烧掉 575 颗，塔腰的格子糊成一团白
+  // （16 格扫参在 `scripts/probe-bloom-rescan.mjs`，两头的门槛都对不上，所以这一格没有参数解）。
+  // 现版那侧的塔本来就没有这条链，所以"地标不进泛光的源"是两边同一张画面，不是新引擎少给一份效果。
+  // 这一格读两样：链自己报"谁被挡在外面"，再看这一层画过的那些像素在开/关之间动不动。
+  const bare = await (async () => {
+    await page.evaluate(async () => {
+      window.__probe.n.setBloom(1);
+      let node = null;
+      window.__probe.n.scene.traverse((object) => { if (object.name === 'landmarks') node = object; });
+      node.visible = false;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    const frame = (await page.screenshot({ clip })).toString('base64');
+    await page.evaluate(async () => {
+      let node = null;
+      window.__probe.n.scene.traverse((object) => { if (object.name === 'landmarks') node = object; });
+      node.visible = true;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    return frame;
+  })();
+  expect((await page.evaluate(() => window.__probe.n.bloomState())).excluded,
+    '泛光那条链没把地标那一层挡在源外面').toEqual(['landmarks']);
   // 逐像素比在页面里做：两份 180 万个数的数组来回传一次比这一项本身还慢。
-  const diff = await page.evaluate(async ([a, b, c]) => {
+  const diff = await page.evaluate(async ([a, b, c, d]) => {
     const luma = (base64) => new Promise((resolve) => {
       const image = new Image();
       image.onload = () => {
@@ -1006,7 +1040,7 @@ test('the new engine blooms its night lamps without veiling the frame', async ({
       };
       image.src = `data:image/png;base64,${base64}`;
     });
-    const [A, B, C] = await Promise.all([luma(a), luma(b), luma(c)]);
+    const [A, B, C, D] = await Promise.all([luma(a), luma(b), luma(c), luma(d)]);
     const median = (values) => Float32Array.from(values).sort()[values.length >> 1];
     const count = (test2) => values => values.reduce((sum, value) => sum + (test2(value) ? 1 : 0), 0);
     let halo = 0; let lifted = 0;
@@ -1014,16 +1048,29 @@ test('the new engine blooms its night lamps without veiling the frame', async ({
       if (A[i] < 100 && B[i] >= 100) halo += 1;
       if (B[i] - A[i] > 2) lifted += 1;
     }
+    // 同一档泛光下"有这一层 vs 没这一层"比出来的那一批像素，就是这一层自己画的；
+    // 再看这一批像素在开/关之间被抬了多少——地标不吃链的话，这一半像素该原地不动。
+    const marks = [];
+    for (let i = 0; i < B.length; i += 1) if (Math.abs(B[i] - D[i]) > 2) marks.push(i);
+    const lift = marks.map((i) => B[i] - A[i]);
     return { halo, lifted, medianOff: +median(A).toFixed(1), medianOn: +median(B).toFixed(1),
       blown: count((value) => value >= 250)(B) - count((value) => value >= 250)(A),
+      footprint: marks.length, insideMedian: +median(lift).toFixed(2),
+      // 最坏那一格只报正方向：泛光只会往上抬，往下走的是那三条透明落水带（底下那批像素本来就归灯管）。
+      insideWorst: +lift.reduce((top, value) => (value > top ? value : top), 0).toFixed(1),
       // 同一档连拍两次必须逐字相同：不是的话这一项量的就是抖动而不是泛光（引擎按需出帧，改完可见性要等一帧）。
       repeat: A.reduce((worst, value, index) => Math.max(worst, Math.abs(value - C[index])), 0).toFixed(2) };
-  }, [off, on, back]);
+  }, [off, on, back, bare]);
   expect(Number(diff.repeat), `同一档连拍两次不一样（最大差 ${diff.repeat}）：这一项量的就不是泛光了`).toBe(0);
   expect(diff.halo, `泛光只把 ${diff.halo} 颗像素推到 100 灰度以上：晕看不见面（关掉那一档是 0）`).toBeGreaterThanOrEqual(250);
   expect(diff.lifted, `只有 ${diff.lifted} 颗像素被抬起来：这一档等于没开`).toBeGreaterThanOrEqual(20000);
   expect(diff.medianOn - diff.medianOff, `全幅中位从 ${diff.medianOff} 抬到 ${diff.medianOn}：这不是晕，是蒙灰`).toBeLessThanOrEqual(4);
   expect(diff.blown, `泛光多烧掉 ${diff.blown} 颗像素（≥250）：亮窗那档过曝了`).toBeLessThanOrEqual(40);
+  // 2026-10-14 实测：这一层自己画了 23,607 颗像素（这块 900×700 里），其中位被泛光抬 0、最坏那 17.9 颗
+  // 全在透明落水带上（它们本来就压在会起晕的江面上）。把 `exclude` 那一格删掉，中位当场涨到 5 以上。
+  expect(diff.footprint, `地标那一层只画了 ${diff.footprint} 颗像素：这一格量不到东西`).toBeGreaterThanOrEqual(20000);
+  expect(diff.insideMedian, `泛光把地标自己画的那 ${diff.footprint} 颗像素中位抬了 ${diff.insideMedian}：这一层又进链了`)
+    .toBeLessThanOrEqual(1);
   // 切回白昼：档位归零，那条链整个不走（白昼那份画面与本轮之前逐字相同，由现版那 71 发判据共同守着）。
   await page.locator('[data-atmosphere-option="day"]').click();
   await page.waitForTimeout(2500);
@@ -1056,7 +1103,13 @@ test('the new engine says what it cannot do, and still has a zoom button', async
   expect(mute, `这些控件灰着但页面不给理由：${JSON.stringify(mute)}`).toEqual([]);
   // 手势那一行不许承诺这一侧做不到的事（"点击楼块查看"在新引擎里是不成立的）。
   expect(ui.hint, `手势提示还在说这一侧做不到的事：${ui.hint}`).not.toContain('点击楼块');
-  expect(ui.note, '边界那一行没点名还缺什么整块能力').toMatch(/塔身|桥|检索|导览/);
+  // 边界那一行不许说谎：已经进这一侧的东西不能被写成"还缺"，还缺的整块能力必须点名。
+  // （注入办法：把 `main.js` 那行改回"塔身、桥……还没过来"，第一格当场红——这一格量的就是"迁完了有没有把话改过来"。）
+  expect(ui.note, '边界那一行没有"已接／还缺"这两段：').toMatch(/已接.*还缺/);
+  const missing = /还缺(.*)$/.exec(ui.note)[1];
+  expect(missing, `壳体与桥已经进这一侧了，边界那行还把它们算成缺的：${missing}`).not.toMatch(/壳体|塔身|桥/);
+  expect(missing, `边界那一行没点名还缺检索：${missing}`).toMatch(/检索/);
+  expect(missing, `边界那一行没点名还缺导览：${missing}`).toMatch(/导览/);
   // 一次点击 = 一级，并且受限幅夹住（夹在相机里，不在按钮上）。
   const zoomOf = () => page.evaluate(() => Number(location.hash.split('/')[0].replace('#map=', '')));
   const start = await zoomOf();
@@ -1099,8 +1152,8 @@ test('the new engine gives back every geometry, material and texture it made', a
   const live = await page.evaluate(() => window.__probe.n.nearTraffic());
   expect([live.cars, live.walkers, live.boats], `近场没装配，这条判据量的是空场景：${JSON.stringify(live)}`)
     .toEqual([1298, 1244, 18]);
-  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（29 几何 + 31 材质 + 11 贴图 = 71 样，
-  // 2026-10-14 实测，`scripts/probe-teardown-engine.mjs`；比波光进来之前多出的那一样贴图是它当前采样那张）。
+  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（55 几何 + 58 材质 + 28 贴图 = 141 样，
+  // 2026-10-14 实测，`scripts/probe-teardown-engine.mjs`；地标那一层进来之前是 29/31/11 = 71 样）。
   const census = await page.evaluate(() => {
     const rows = [];
     const seen = new Set();
@@ -1129,19 +1182,27 @@ test('the new engine gives back every geometry, material and texture it made', a
     window.__ledger = rows;
     const named = {};
     window.__probe.n.scene.traverse((object) => { if (object.name && object.isObject3D && !named[object.name]) named[object.name] = object; });
-    window.__groups = Object.fromEntries(['traffic-life', 'water-life', 'shore-wet', 'building-bases-group', 'river-sheen']
-      .map((name) => [name, named[name] ?? null]));
+    window.__groups = Object.fromEntries(['traffic-life', 'water-life', 'shore-wet', 'building-bases-group', 'river-sheen',
+      'landmarks'].map((name) => [name, named[name] ?? null]));
     return { total: rows.length, byKind: rows.reduce((a, r) => { a[r.kind] = (a[r.kind] ?? 0) + 1; return a; }, {}),
       owners: [...new Set(rows.map((r) => r.owner))].sort(),
       missingGroups: Object.entries(window.__groups).filter(([, node]) => !node).map(([name]) => name) };
   });
   expect(census.byKind, `三样一样都不能缺（几何/材质/贴图）：${JSON.stringify(census.byKind)}`)
-    .toEqual({ geometry: 29, material: 31, texture: 11 });
+    .toEqual({ geometry: 55, material: 58, texture: 28 });
   expect(census.missingGroups, `这些组没挂进引擎的场景，"摘干净"那一半就量不到：${JSON.stringify(census.missingGroups)}`)
     .toEqual([]);
   // 漏了 #177 的那几组名字必须出现在台账里，否则这条判据量到的可能只是引擎自己那五块。
   for (const group of ['traffic-cars', 'traffic-lamps', 'traffic-walkers', 'water-boats', 'signal-poles', 'shore-wet-line', 'building-bases']) {
     expect(census.owners, `台账里没有 ${group}，近场那几组没挂进场景`).toContain(group);
+  }
+  // 地标那一层同理：一块壳体、一座桥、塔身网格、光柱与三条带各自都要在台账里点名——
+  // 少一块就是有人搬了画面没搬 teardown（台账总数从 71 样涨到 141 样，多出来的这一半就是这些名字）。
+  // 名单取的是"资源自己那一格最近的有名祖先"，所以 `landmarks` 与 `landmark-forms` 这两层壳不会出现在里面。
+  for (const group of ['184738716', '240896442', '511404889', '1313608038', '1313608038:rib', '1313608038:abutment',
+    '184738716:crown', '511404889:crown', '184738716:podium', 'tower-model', 'beam', 'river-glow',
+    '184738716:spill', '511404889:spill']) {
+    expect(census.owners, `台账里没有 ${group}，地标那一层没整块挂进场景`).toContain(group);
   }
   const after = await page.evaluate(() => {
     window.__probe.n.dispose();
@@ -1163,7 +1224,8 @@ test('the new engine gives back every geometry, material and texture it made', a
   expect(after.missed, `dispose 没还掉：${JSON.stringify(after.missed)}`).toEqual([]);
   // 还了资源不等于摘了节点：`group.clear()` 那一半单独钉，与 Node 侧那条 `[0, 0, 0]` 同一个口径。
   expect(after.left, `dispose 之后这些组里还留着节点：${JSON.stringify(after.left)}`)
-    .toEqual({ 'traffic-life': 0, 'water-life': 0, 'shore-wet': 0, 'building-bases-group': 0, 'river-sheen': 0 });
+    .toEqual({ 'traffic-life': 0, 'water-life': 0, 'shore-wet': 0, 'building-bases-group': 0, 'river-sheen': 0,
+      landmarks: 0 });
   expect(after.panel, 'dispose 之后读数面板还留在页面上').toBe(false);
   // 贴图归造它的那一方还（`boot.js` 那颗光晕、`scene.js` 那两张图集），这里只要求"有人还了"。
   expect(errors, `拆场景的过程中报了错：${JSON.stringify(errors)}`).toEqual([]);
@@ -1510,4 +1572,209 @@ test('the new engine lays the river sheen on the same water with a screen-sized 
     .toBeGreaterThan(atHalf[1] + 0.05);
 
   expect(errors, `江面波光这一层跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+
+// 项 5 剩下的最后一格（#190，随 #170 一起收口）：地标那一整批资产进新引擎。
+// 现版那侧它们站在**另一套 `THREE.Scene`** 里借 MapLibre 的画布补画（`src/tower.js:507`），几何与材质全是纯工厂，
+// 所以搬进来的不是像素也不是算法，只有"谁把镜头交给它们"这一格——米制原点两边是同一个（`createProjection`
+// 复用的就是 `geo.plane`），网格因此一字未改。要钉的七件事全部是量出来的：
+// ① 名单同源、三栋盒子让位、面板报片数；② 摘掉这一层的自差（发数／三角形／像素，包围盒要落在塔那一片）；
+// ③ 夜景闸门：光柱与三条落水带只跟着夜景权重出画，白昼一颗不发；④ 夜里再摘一次，多出来的那 8 发就是它们；
+// ⑤ 色相那一格真的进了材质，停动效逐字交回出厂那一帧；⑥ 这一层的雾化在它自己手里（每张材质 `fog === false`，
+//    引擎的 `scene.fog` 再打一遍就是双重雾化）；⑦ 墙色跟着镜头走那条距离斜坡。
+test('the new engine stands the three landmark shells with their beam and spill bands', async ({ page }) => {
+  test.setTimeout(420000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) errors.push(message.text()); });
+  const { FORM_OSM_IDS } = await import('../src/landmark-forms.js');
+  const CLIP = { x: 0, y: 0, width: 1440, height: 960 };
+  const BANDS = ['river-glow', '184738716:spill', '511404889:spill'];
+  await openEngine(page, 'three');
+  await page.evaluate(async (bands) => {
+    const { neighborhood: n } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    window.__probe = { n };
+    // 动效必须按住：色相、皇冠呼吸、车流与换窗都在走，两帧的差里混着它们，这一层的账就不干净。
+    n.setMotion(false);
+    window.__node = (name) => {
+      let found = null;
+      n.scene.traverse((object) => { if (object.name === name) found = object; });
+      return found;
+    };
+    window.__layer = (visible) => { window.__node('landmarks').visible = visible; };
+    // 这一层每张材质的当前颜色：色相那一格、两顶皇冠的呼吸、墙那条斜坡，最后都落到这一串字符串上。
+    window.__paint = (name) => {
+      const seen = new Set();
+      const rows = [];
+      for (const object of (window.__node(name) ? [window.__node(name)] : [])) {
+        object.traverse((node) => {
+          for (const material of [].concat(node.material ?? [])) {
+            if (!material || seen.has(material)) continue;
+            seen.add(material);
+            rows.push([material.name ?? '', material.color ? material.color.getHexString() : '',
+              material.emissive ? material.emissive.getHexString() : '',
+              +(material.emissiveIntensity ?? 1).toFixed(4)].join('|'));
+          }
+        });
+      }
+      return rows.sort();
+    };
+    window.__state = () => {
+      const rows = bands.map((name) => {
+        const mesh = window.__node(name);
+        return [mesh.visible, Math.round(mesh.material.opacity * 100) / 100];
+      });
+      return { bands: rows, beam: window.__node('beam').visible };
+    };
+    window.__lum = async (b64) => {
+      const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width; canvas.height = bitmap.height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(bitmap, 0, 0);
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const lum = new Float32Array(bitmap.width * bitmap.height);
+      for (let i = 0; i < lum.length; i++) lum[i] = 0.2126 * data[i * 4] + 0.7152 * data[i * 4 + 1] + 0.0722 * data[i * 4 + 2];
+      return { lum, width: bitmap.width };
+    };
+    window.__diff = async (a, b) => {
+      const x = await window.__lum(a), y = await window.__lum(b);
+      let changed = 0, sum = 0, worst = 0, box = null;
+      for (let i = 0; i < x.lum.length; i++) {
+        const d = Math.abs(x.lum[i] - y.lum[i]);
+        sum += d;
+        if (d > worst) worst = d;
+        if (d > 2) {
+          changed += 1;
+          const row = Math.floor(i / x.width), col = i % x.width;
+          box = box ? { x0: Math.min(box.x0, col), x1: Math.max(box.x1, col), y0: Math.min(box.y0, row), y1: Math.max(box.y1, row) }
+            : { x0: col, x1: col, y0: row, y1: row };
+        }
+      }
+      return { changed, mean: +(sum / x.lum.length).toFixed(2), worst: Math.round(worst), box };
+    };
+  }, BANDS);
+  const read = () => page.evaluate(() => {
+    const counts = window.__probe.n.counts();
+    return { landmarks: counts.landmarks, drawCalls: counts.drawCalls, triangles: counts.triangles,
+      buildings: counts.buildings, panel: document.querySelector('.engine-stats').textContent };
+  });
+  const pair = async () => {
+    await page.evaluate(() => { document.querySelector('.engine-stats').style.visibility = 'hidden'; });
+    await page.evaluate(() => window.__layer(true));
+    await page.waitForTimeout(900);
+    const on = (await page.screenshot({ clip: CLIP })).toString('base64');
+    const onCounts = await read();
+    await page.evaluate(() => window.__layer(false));
+    await page.waitForTimeout(900);
+    const off = (await page.screenshot({ clip: CLIP })).toString('base64');
+    const offCounts = await read();
+    await page.evaluate(() => {
+      window.__layer(true);
+      document.querySelector('.engine-stats').style.visibility = '';
+    });
+    return { on, off, onCounts, offCounts };
+  };
+
+  // ① 名单同源：壳体就是 `LANDMARK_FORMS` 那四张身份，一条不多一条不少；三栋有盒子的塔必须让位。
+  const opened = await read();
+  expect(opened.landmarks.ids, `壳体名单与 FORM_OSM_IDS 不同源：${JSON.stringify(opened.landmarks.ids)}`)
+    .toEqual([...FORM_OSM_IDS]);
+  expect([opened.landmarks.shells, opened.landmarks.bands, opened.landmarks.beam, opened.landmarks.night,
+    opened.landmarks.hue, opened.landmarks.visible],
+    `白昼开屏这一层的账不对：${JSON.stringify(opened.landmarks)}`)
+    .toEqual([4, BANDS, false, 0, 0, true]);
+  expect(opened.landmarks.vertices, `这一层只有 ${opened.landmarks.vertices} 颗顶点：几何没搬全`)
+    .toBe(100552);
+  expect(opened.buildings, `壳体底下的盒子没让位（一栋塔两套皮）：楼块还是 ${opened.buildings} 栋`).toBe(3987);
+  expect(opened.panel, `面板没把壳体报出来：${opened.panel}`).toContain('壳体 4 片');
+
+  // ② 摘掉这一层的自差：正好少 30 发与 121,803 个三角形，画面差 22,724 颗像素，而且那一片就是塔与壳站的地方。
+  const day = await pair();
+  expect([day.onCounts.drawCalls - day.offCounts.drawCalls, day.onCounts.triangles - day.offCounts.triangles],
+    `白昼摘掉这一层应当正好少它自己那批发数与三角形：${JSON.stringify([day.onCounts, day.offCounts])}`)
+    .toEqual([30, 121803]);
+  const dayPaint = await page.evaluate(async ({ on, off }) => window.__diff(on, off), day);
+  expect(dayPaint.changed, `这一层白昼只画了 ${dayPaint.changed} 颗像素：壳体没上屏`).toBeGreaterThanOrEqual(20000);
+  expect(dayPaint.worst, `这一层最亮那道边只差 ${dayPaint.worst} 个灰阶`).toBeGreaterThanOrEqual(100);
+  // 包围盒要装得下塔冠那一点（600 m 的塔在 15.5 级上顶到画面顶上），又不许铺满全幅——
+  // 铺满就是这一层在改整幅的底色，不是在立四栋地标。
+  const crown = await page.evaluate(() => {
+    const point = window.__probe.n.screen({ lng: 113.31913, lat: 23.109, altitude: 460 });
+    return [Math.round(point.x), Math.round(point.y)];
+  });
+  const box = dayPaint.box;
+  expect(crown[0] >= box.x0 && crown[0] <= box.x1 && crown[1] >= box.y0 && crown[1] <= box.y1,
+    `塔冠那一点 ${JSON.stringify(crown)} 不在这一层画到的范围 ${JSON.stringify(box)} 里：塔没立在它自己的位置上`).toBe(true);
+  expect((box.x1 - box.x0) * (box.y1 - box.y0),
+    `这一层画到的范围占了 ${(((box.x1 - box.x0) * (box.y1 - box.y0)) / (1440 * 960) * 100).toFixed(0)}% 的画幅：不像四栋楼`)
+    .toBeLessThan(1440 * 960 * 0.45);
+
+  // ③ 夜景闸门：光柱与三条落水带只跟着夜景权重出画。白昼那三颗是"有 mesh、不发光"，不是"没造出来"。
+  expect(await page.evaluate(() => window.__state()),
+    '白昼的光柱或落水带亮着').toEqual({ bands: [[false, 0], [false, 0], [false, 0]], beam: false });
+  await page.locator('[data-atmosphere-option="night"]').click();
+  await page.waitForTimeout(3000);
+  expect(await page.evaluate(() => window.__state()),
+    '夜景没给满档：光柱与三条落水带该各自报自己的透明度')
+    .toEqual({ bands: [[true, 0.55], [true, 0.24], [true, 0.24]], beam: true });
+  expect((await read()).landmarks.night, '这一层自己报的夜景权重不是满档').toBe(1);
+
+  // ④ 夜里再摘一次：多出来的那 8 发与 172 个三角形就是光柱与三条带（白昼它们一发不发）。
+  const night = await pair();
+  expect([night.onCounts.drawCalls - night.offCounts.drawCalls, night.onCounts.triangles - night.offCounts.triangles],
+    `夜景摘掉这一层的差与白昼对不上，光柱与落水带就没进账：${JSON.stringify([night.onCounts, night.offCounts])}`)
+    .toEqual([38, 121975]);
+  const nightPaint = await page.evaluate(async ({ on, off }) => window.__diff(on, off), night);
+  expect(nightPaint.changed, `夜景这一层只画了 ${nightPaint.changed} 颗像素：灯没上去`).toBeGreaterThanOrEqual(20000);
+
+  // ⑤ 色相那一格真的进了材质（默认档 `single`：整根 shaft 一个色相、40 秒一圈），停动效逐字交回出厂那一帧。
+  // 走色相那一格只读塔身自己那批材质：整层的颜色串里还混着两顶皇冠的呼吸，把 `advance` 里的 `paintTower()` 删掉
+  // 时皇冠照样在变，整层比就抓不到（第一版就是这么漏的一条注入）。
+  const still = await page.evaluate(() => window.__paint('tower-model'));
+  const stillAll = await page.evaluate(() => window.__paint('landmarks'));
+  await page.evaluate(() => window.__probe.n.setMotion(true));
+  await page.waitForTimeout(3500);
+  const walked = await page.evaluate(() => ({ paint: window.__paint('tower-model'), hue: window.__probe.n.counts().landmarks.hue }));
+  await page.evaluate(() => window.__probe.n.setMotion(false));
+  await page.waitForTimeout(900);
+  const stopped = await page.evaluate(() => ({ paint: window.__paint('landmarks'), hue: window.__probe.n.counts().landmarks.hue }));
+  expect(walked.hue, `3.5 秒只走到 ${walked.hue}：40 秒一圈那条环没在走`).toBeGreaterThan(0.05);
+  expect(walked.hue, `3.5 秒走到 ${walked.hue}，比一圈的十分之一还多`).toBeLessThan(0.15);
+  expect(walked.paint.join('\n'), '色相走到了读数里却没进塔身的材质：这一格只是个数').not.toEqual(still.join('\n'));
+  expect(stopped.paint.join('\n'), '停动效没交回出厂那一帧：这一层的材质与开屏那一份不一样').toEqual(stillAll.join('\n'));
+  expect(stopped.hue, '停动效之后色相没归零').toBe(0);
+
+  // ⑥ 这一层的雾化在它自己手里：引擎的 `scene.fog` 再打一遍就是双重雾化（现版那座场景里本来就没有雾）。
+  const fogged = await page.evaluate(() => {
+    const seen = new Set();
+    const bad = [];
+    window.__node('landmarks').traverse((object) => {
+      for (const material of [].concat(object.material ?? [])) {
+        if (!material || seen.has(material)) continue;
+        seen.add(material);
+        if (material.fog !== false) bad.push(material.name || object.name);
+      }
+    });
+    return { count: seen.size, bad, sceneFog: Boolean(window.__probe.n.scene.fog) };
+  });
+  expect(fogged.sceneFog, '引擎这一侧没有雾，这一格量不到东西').toBe(true);
+  expect(fogged.bad, `这些材质还在吃引擎的雾：${JSON.stringify(fogged.bad)}`).toEqual([]);
+  expect(fogged.count, `这一层数出 ${fogged.count} 张材质，与它自己报的数对不上`).toBe((await read()).landmarks.materials);
+
+  // ⑦ 墙色跟着镜头走那条距离斜坡：同一档两次读数逐字相同，跨两档必须变（`landmarks?.update(view.zoom)` 那一行）。
+  await page.locator('[data-atmosphere-option="day"]').click();
+  await page.waitForTimeout(2500);
+  const shells = async (zoom) => {
+    await page.evaluate((value) => window.__probe.n.setView({ ...window.__probe.n.view(), zoom: value }), zoom);
+    await page.waitForTimeout(900);
+    return page.evaluate(() => window.__paint('landmark-forms').join('\n'));
+  };
+  const near = await shells(15.5);
+  const far = await shells(13);
+  expect(far, '镜头拉低两档半，壳体的墙色一格没变：那条距离斜坡没跟着镜头走').not.toEqual(near);
+  expect(await shells(15.5), '回到同一档，墙色没交回原来那一份：斜坡是个随机量').toEqual(near);
+
+  expect(errors, `地标这一层跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
 });

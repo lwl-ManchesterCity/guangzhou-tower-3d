@@ -17,6 +17,7 @@ import {
 } from './facades.js';
 import { createProjection } from './projection.js';
 import { createRiverSheen } from './river.js';
+import { createLandmarks, underShell } from './landmarks.js';
 import { LAMP_PERIODS_MS, lampWeight } from '../facade.js';
 import { createBloom } from './bloom.js';
 
@@ -156,7 +157,18 @@ export function createEngineScene(options) {
   const river = createRiverSheen({ project, surfaces, atmosphere: atmosphereId });
   // 默认画全量：3,990 面按类别并成几桶。`testBuildings` 留着一个调试阀门——要只看最高的 N 栋时传个数进来，
   // 现版那套"取真实最高的 10 栋、按高度再按 id 排序"的确定性还在 `pickTallest` 里。
-  const features = testBuildings ? pickTallest(data.buildings ?? [], testBuildings) : (data.buildings ?? []);
+  // 有壳体站在那几块地上之后，盒子必须先让位：现版那侧是样式里的 `formFilter`（`['!', ['in', osmId, …]]`），
+  // 这里同一件事写成一次过滤——**壳体与它底下的盒子不能同时画**，一栋塔两套皮在夜景就是两圈发光轮廓。
+  const shellFeatures = SCENE.towerId && (data.bridge ?? []).length
+    ? [...(data.buildings ?? []), ...data.bridge] : [];
+  const bucketFeatures = (data.buildings ?? []).filter((feature) =>
+    !shellFeatures.length || !underShell(feature));
+  const features = testBuildings ? pickTallest(bucketFeatures, testBuildings) : bucketFeatures;
+  // 地标那一整批资产（广州塔网格、东西塔与省博的壳体、海心桥、塔顶光柱、三塔落水带）走的是现版同一批纯工厂，
+  // 搬进来的只有"谁交镜头"这一格。没有桥面快照的那一侧（景泰）就没有壳体，这一整块不存在。
+  const landmarks = shellFeatures.length
+    ? createLandmarks({ features: shellFeatures, river: data.river ?? [], origin: SCENE.center ?? DEFAULT_CENTER, mode: atmosphereId })
+    : null;
   // Phase 2 的窗纹：像素、节奏表、类别映射与透明度斜坡全部读 `src/facade.js` 那一套，现版与新引擎共用同一份定义。
   // 夜景亮窗走图集（`lampAtlasTexture`）：一格一档（高度带 × 色温 × 距离环，外加一行"整栋不亮"），
   // 楼的格号作为逐顶点属性带进几何，片元里 `fract` 回自己那一格 —— 桶因此还是四个，不必按档拆。
@@ -180,6 +192,7 @@ export function createEngineScene(options) {
   const bases = options.bases ?? null;
   if (bases) scene.add(bases.group);
   scene.add(ground.group, river.group, buildings.group);
+  if (landmarks) scene.add(landmarks.group);
 
   // 现版那个循环写的是样式与 global state，这里写的是一格图集里的两个采样权重与一批实例矩阵。
   // 两组的周期与 `lampWeight` 都从 `src/facade.js` 取，所以同一时刻两边给同一组楼的是同一个数。
@@ -205,6 +218,11 @@ export function createEngineScene(options) {
       setLampWeights(lampMaterials, ...lampWeights());
       motion.lampTicks++;
     }
+    // 塔身的色相与三顶皇冠的呼吸骑同一拍（现版那侧也是这一拍：`map.js` 里 `motion.hue`/`motion.breath` 都在
+    // `motion.river >= MOTION_STEP_MS` 那个分支里推进）。差别只有一处：现版的 `breath` 累的是整帧差值、
+    // `hue` 累的是整步数，这里两样都按整步走——皇冠的周期是 7 s 与 8 s，一步 120 ms 是 1.7 % 的相位，
+    // 两边不对齐这件事本来就不成立（夜景画面从来不在跨引擎闸门里）。
+    landmarks?.advance(elapsed);
   }
   // 停下来不是暂停：车流回到出厂那一格、两组的权重回到 1/1，也就是"这个功能不存在的那一页"画的同一帧。
   function settleMotion(zoom) {
@@ -212,6 +230,8 @@ export function createEngineScene(options) {
     motion.lamp = 0;
     nearField?.advance(0, zoom);
     river.reset();
+    // 塔身转回出厂那一格色相、皇冠回到第 0 毫秒：现版那句"停下要把出厂帧还回来"在地标这一层的同一件事。
+    landmarks?.reset();
     setLampWeights(lampMaterials, 1, 1);
   }
 
@@ -297,7 +317,10 @@ export function createEngineScene(options) {
   };
   const ensureBloom = () => {
     if (!bloom) {
-      bloom = createBloom({ renderer, scene, camera: rig.camera, width: lastWidth, height: lastHeight });
+      bloom = createBloom({ renderer, scene, camera: rig.camera, width: lastWidth, height: lastHeight,
+        // 地标那一层不吃泛光：塔冠关着泛光就有 248/255，比任何还能让灯芯起晕的门槛都亮，留在链里就是
+        // 塔把整条链的能量摊到全幅（现版那侧的塔本来就没有这条链）。理由与数字在 `bloom.js` 顶上。
+        exclude: landmarks ? [landmarks.group] : [] });
       bloom.setShare(bloomShare);
     }
     return bloom;
@@ -339,6 +362,9 @@ export function createEngineScene(options) {
     // 波光的透明度读 zoom，格子读转角、设备倍率与画布中心——斜坡那一格内部按 1/20 级归档，镜头停住就不必再写。
     river.setView({ zoom: view.zoom, bearing: view.bearing, pixelRatio: renderer.getPixelRatio(),
       width: lastWidth, height: lastHeight, centre: view.center });
+    // 壳体的墙色是那条距离斜坡的产物，而斜坡跟着镜头，所以它必须在**它被画的那一帧**读 zoom——
+    // 与现版那侧 `tower.js` 的 `render` 里那句 `forms.recede(mapRef.getZoom())` 同一格。
+    landmarks?.update(view.zoom);
     if (motion.on) {
       // 后台标签页停 rAF，回到前台那一帧的差值是整个空档；不夹一下车流会瞬移，与现版那条江面同一个理由。
       const delta = motion.previous === undefined ? 0 : Math.min(time - motion.previous, 4 * MOTION_STEP_MS);
@@ -364,7 +390,7 @@ export function createEngineScene(options) {
       const features = ground.report.features;
       const greens = (features.park ?? 0) + (features.grass ?? 0) + (features.wood ?? 0);
       panel.textContent = `V8 Phase 2 · three ${samples.fps} fps · 最长帧 ${samples.ms} ms · ${buildings.count} 栋 / 窗纹 ${buildings.grids} 层 / `
-        + `灯火 ${buildings.lamps + buildings.glows} 层 / 波光 ${river.mesh ? 1 : 0} 层 / 江上 ${nearField?.counts.boats ?? 0} 船 / 地面 ${ground.group.children.length} 块：`
+        + `灯火 ${buildings.lamps + buildings.glows} 层 / 波光 ${river.mesh ? 1 : 0} 层 / 壳体 ${landmarks?.report().shells ?? 0} 片 / 江上 ${nearField?.counts.boats ?? 0} 船 / 地面 ${ground.group.children.length} 块：`
         + `水 ${features.water ?? 0}·绿 ${greens}·地块 ${features.block ?? 0}·铺装 ${features.pavement ?? 0}·路 ${features.road ?? 0}`;
     }
     // The hash is the shared language between the two engines, but writing it on every frame would push a new entry
@@ -412,7 +438,9 @@ export function createEngineScene(options) {
       // 泛光那一格并进读数：判据要能分清"这一帧多了几发"是灯火层多的还是后处理链多的。
       bloom: bloom ? { ...bloom.report(), built: true } : { share: bloomShare, built: false },
       // 江面波光那一层单独报一发数：它是新增的写入者，发数账与像素判据都要能把它摘出去。
-      river: river.report() }),
+      river: river.report(),
+      // 地标这一层同理：壳体名单、几片壳、三条落水带在不在、夜景权重走到哪——"关掉这一层少了什么"要能报得出来。
+      landmarks: landmarks ? landmarks.report() : null }),
     /**
      * 泛光的阀门：给一个数是档位（0~1，夜景给满），给一个对象是逐格改那三个数（`{strength, radius, threshold}`）。
      * 取证脚本扫参数靠后一种；判据读 `counts().bloom` 那一格看它落在哪一档。
@@ -429,6 +457,8 @@ export function createEngineScene(options) {
       setBloomShare(atmosphereId === 'night' ? 1 : 0);
       // 江面那三档贴图与现版同一份，换氛围就是换采样那一张图并把格子放回出厂那一行。
       river.setAtmosphere(atmosphereId);
+      // 地标这一层跟着换：塔身那五份自发光基线、壳体的墙色斜坡、落水带与光柱的夜景权重都在这一句后面。
+      landmarks?.setAtmosphere(atmosphereId);
       return atmosphereId;
     },
     /** 动效总开关。关掉 = 现版那侧的"全部停下"：车流与交叉淡都回到出厂那一格。 */
@@ -469,6 +499,8 @@ export function createEngineScene(options) {
       nearField?.dispose();
       bases?.dispose?.();
       river.dispose();
+      // 地标这一层的几何、材质与贴图都在它自己手里（立面图集、灯图、塔网格那道高度斜坡的贴图），还由这一层喊。
+      landmarks?.dispose();
       bloom?.dispose();
       panel.remove();
       renderer.dispose();

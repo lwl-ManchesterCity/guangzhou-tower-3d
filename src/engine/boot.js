@@ -13,7 +13,7 @@ import { createBaseBands } from '../shadow-pads.js';
 export const ENGINE_LAYERS = {
   canton: { buildings: 'canton-buildings.geojson', streets: 'canton-streets.geojson',
     water: 'canton-water.geojson', greens: 'canton-greens.geojson', blocks: 'canton-blocks.geojson',
-    river: 'canton-river.geojson' },
+    river: 'canton-river.geojson', bridge: 'haixin-bridge.geojson' },
   jingtai: { buildings: 'jingtai-buildings.geojson', streets: 'jingtai-roads.geojson', grounds: 'jingtai-grounds.geojson' },
 };
 
@@ -29,9 +29,10 @@ export async function bootThreeEngine({ container, base = '/data/', onError, sce
     .map(async ([key, file]) => [key, await load(file)]));
   // 近场三组（项 5 与江上的船）。算法、路网、米制原点与现版是同一份，所以这里不写第二套"车怎么摆"，也不写
   // 第二套开关：装配交给 `src/near-field.js`，谁在动由引擎这一侧的 120 ms 一拍说了算。
-  // 车的高度只认"这一侧画不画桥面"：现版那侧 `src/bridges.js` 把桥挤成了实体，车要站到桥面顶上；
-  // 引擎这一侧还没有桥体（随 #170 一起搬），这里抬起来只会让车浮在自己那条平色路带上面。
-  // 所以 `decks` 故意不传，等桥体进引擎那天再接同一条规则。学校那侧没有路网快照，也没有塔，就是没有近场。
+  // 车的高度还有一项来自桥：`crossings` 里那些 `part === 'deck'` 的件就是现版那两层挤出体的顶。
+  // 引擎这一侧现在只画海心桥那一条桥面（壳体那一格，#190），其余跨江桥面还是平色路带——
+  // 而这条规则是"同名继承"，把整份 `deckHeights` 传进来会让车站到一条没画的桥上去。
+  // 所以 `decks` 仍然不传，等其余桥面进引擎那天一起接（#192）。学校那侧没有路网快照，也没有塔，就是没有近场。
   const streets = (entries.find(([key]) => key === 'streets') ?? [])[1] ?? [];
   const river = (entries.find(([key]) => key === 'river') ?? [])[1] ?? [];
   // 岸线用同一批 `water` 面，所以船的横向游移在窄的那条汊里会被夹回到水里。
