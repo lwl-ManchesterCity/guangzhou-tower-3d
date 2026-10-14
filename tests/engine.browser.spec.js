@@ -1099,8 +1099,8 @@ test('the new engine gives back every geometry, material and texture it made', a
   const live = await page.evaluate(() => window.__probe.n.nearTraffic());
   expect([live.cars, live.walkers, live.boats], `近场没装配，这条判据量的是空场景：${JSON.stringify(live)}`)
     .toEqual([1298, 1244, 18]);
-  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（28 几何 + 30 材质 + 10 贴图 = 68 样，
-  // 2026-10-14 实测，`scripts/probe-teardown-engine.mjs`）。
+  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（29 几何 + 31 材质 + 11 贴图 = 71 样，
+  // 2026-10-14 实测，`scripts/probe-teardown-engine.mjs`；比波光进来之前多出的那一样贴图是它当前采样那张）。
   const census = await page.evaluate(() => {
     const rows = [];
     const seen = new Set();
@@ -1117,19 +1117,26 @@ test('the new engine gives back every geometry, material and texture it made', a
       for (const material of [].concat(object.material ?? [])) {
         add(material, 'material', object);
         for (const value of Object.values(material)) if (value && value.isTexture) add(value, 'texture', object);
+        // 片元注入那几份材质把贴图握在 `shader.uniforms` 里（江面波光那张就是），翻材质属性看不见它，
+        // 所以台账还要走一遍 uniform——否则这一层换氛围留下的那张贴图没人查。
+        // 例外：`DFG_LUT` 是 three.js 渲染器自己那颗全局查找表，它挂在每份 shader 的 uniform 里，
+        // 归属不在本场景（2026-10-14 实测：走 uniform 之后台账多出的那一条没还的就是它，挂在第一个被遍历到的材质名下）。
+        for (const uniform of Object.values(material.userData?.shader?.uniforms ?? {})) {
+          if (uniform?.value?.isTexture && uniform.value.name !== 'DFG_LUT') add(uniform.value, 'texture', object);
+        }
       }
     });
     window.__ledger = rows;
     const named = {};
     window.__probe.n.scene.traverse((object) => { if (object.name && object.isObject3D && !named[object.name]) named[object.name] = object; });
-    window.__groups = Object.fromEntries(['traffic-life', 'water-life', 'shore-wet', 'building-bases-group']
+    window.__groups = Object.fromEntries(['traffic-life', 'water-life', 'shore-wet', 'building-bases-group', 'river-sheen']
       .map((name) => [name, named[name] ?? null]));
     return { total: rows.length, byKind: rows.reduce((a, r) => { a[r.kind] = (a[r.kind] ?? 0) + 1; return a; }, {}),
       owners: [...new Set(rows.map((r) => r.owner))].sort(),
       missingGroups: Object.entries(window.__groups).filter(([, node]) => !node).map(([name]) => name) };
   });
   expect(census.byKind, `三样一样都不能缺（几何/材质/贴图）：${JSON.stringify(census.byKind)}`)
-    .toEqual({ geometry: 28, material: 30, texture: 10 });
+    .toEqual({ geometry: 29, material: 31, texture: 11 });
   expect(census.missingGroups, `这些组没挂进引擎的场景，"摘干净"那一半就量不到：${JSON.stringify(census.missingGroups)}`)
     .toEqual([]);
   // 漏了 #177 的那几组名字必须出现在台账里，否则这条判据量到的可能只是引擎自己那五块。
@@ -1156,8 +1163,351 @@ test('the new engine gives back every geometry, material and texture it made', a
   expect(after.missed, `dispose 没还掉：${JSON.stringify(after.missed)}`).toEqual([]);
   // 还了资源不等于摘了节点：`group.clear()` 那一半单独钉，与 Node 侧那条 `[0, 0, 0]` 同一个口径。
   expect(after.left, `dispose 之后这些组里还留着节点：${JSON.stringify(after.left)}`)
-    .toEqual({ 'traffic-life': 0, 'water-life': 0, 'shore-wet': 0, 'building-bases-group': 0 });
+    .toEqual({ 'traffic-life': 0, 'water-life': 0, 'shore-wet': 0, 'building-bases-group': 0, 'river-sheen': 0 });
   expect(after.panel, 'dispose 之后读数面板还留在页面上').toBe(false);
   // 贴图归造它的那一方还（`boot.js` 那颗光晕、`scene.js` 那两张图集），这里只要求"有人还了"。
   expect(errors, `拆场景的过程中报了错：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+
+// 项 5 剩下的那一格（#189）：江面那层波光进新引擎。
+// 现版那侧是"水色一层 fill ＋ 波光一层 fill-pattern"，这里沿用同一个形状：与水面包同几何的覆盖网格、
+// 不受光的半透明材质，像素仍然出自同一份 `waterTexture`（Node 那侧逐字节比过）。要钉的四件事全部是量出来的：
+// ① 名单同源；② 屏幕上正好 64 个 CSS 像素一圈、不随缩放胀大；③ 这一圈跟着镜头转；
+// ④ 平移时格子跟着江面走（这一格是最先做错的：那一版整张格子钉在视口上，现版那侧不是，见 `river.js` 顶上那段）。
+// 跨引擎对像素仍然不做：现版的取景带着 `setPadding`（#191），同一串 hash 两边差 140×70 像素。
+test('the new engine lays the river sheen on the same water with a screen-sized tile that rides the ground', async ({ page }) => {
+  test.setTimeout(540000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) errors.push(message.text()); });
+  const CLIP = { x: 0, y: 0, width: 1440, height: 960 };
+  await openEngine(page, 'three');
+  await page.evaluate(async () => {
+    const { neighborhood: n } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    window.__probe = { n };
+    // 动效必须按住：车、人、船与波光自己那一拍都在走，两帧的差里混着它们，这一层的像素账就不干净。
+    n.setMotion(false);
+    window.__mesh = () => {
+      let mesh = null;
+      n.scene.traverse((object) => { if (object.name === 'river-sheen-water') mesh = object; });
+      return mesh;
+    };
+    // 运算全留在页面里：一帧 1440×960 的亮度数组不打算搬过 CDP。
+    window.__lum = async (b64) => {
+      const bitmap = await createImageBitmap(await (await fetch('data:image/png;base64,' + b64)).blob());
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width; canvas.height = bitmap.height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(bitmap, 0, 0);
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      const lum = new Float32Array(bitmap.width * bitmap.height);
+      for (let i = 0; i < lum.length; i++) lum[i] = 0.2126 * data[i * 4] + 0.7152 * data[i * 4 + 1] + 0.0722 * data[i * 4 + 2];
+      return { lum, width: bitmap.width, height: bitmap.height };
+    };
+    window.__diff = async (a, b) => {
+      const x = await window.__lum(a), y = await window.__lum(b);
+      let sum = 0, changed = 0, worst = 0;
+      for (let i = 0; i < x.lum.length; i++) {
+        const d = Math.abs(x.lum[i] - y.lum[i]);
+        sum += d;
+        if (d > worst) worst = d;
+        if (d > 1) changed++;
+      }
+      return { changed, mean: Math.round(sum / x.lum.length * 100) / 100, worst: Math.round(worst), pixels: x.lum.length };
+    };
+    // "开减关"的差值图就是这一层单独画了什么；掩膜取 |差值|>2，楼体、绿地与网格边那些抗锯齿像素不进这个账。
+    window.__field = async (a, b) => {
+      const x = await window.__lum(a), y = await window.__lum(b);
+      const d = new Float32Array(x.lum.length);
+      const m = new Uint8Array(x.lum.length);
+      let changed = 0;
+      for (let i = 0; i < x.lum.length; i++) {
+        d[i] = x.lum[i] - y.lum[i];
+        if (Math.abs(d[i]) > 2) { m[i] = 1; changed++; }
+      }
+      return { d, m, changed, width: x.width, height: x.height };
+    };
+    // 自比（同一张差值图挪 dx,dy）：钉"屏幕上正好 64 像素一圈"与"这一圈跟着镜头转"。
+    window.__periodic = async (a, b, offsets) => {
+      const { d, m, width, height } = await window.__field(a, b);
+      const out = {};
+      for (const [dx, dy] of offsets) {
+        let num = 0, den = 0, pairs = 0;
+        for (let row = Math.max(0, -dy); row + dy < height; row++) {
+          for (let col = Math.max(0, -dx); col + dx < width; col++) {
+            const i = row * width + col, j = (row + dy) * width + (col + dx);
+            if (!m[i] || !m[j]) continue;
+            num += d[i] * d[j]; den += d[i] * d[i]; pairs++;
+          }
+        }
+        out[`${dx},${dy}`] = [Math.round(num / (den || 1) * 100) / 100, pairs];
+      }
+      return out;
+    };
+    // 互比（两张差值图挪 dx,dy）：平移锚定那一格用。幅度会随镜头漂（雾、入射角），所以用归一化相关而不是逐像素差。
+    window.__align = async (first, second, offsets) => {
+      const A = await window.__field(first.a, first.b);
+      const B = await window.__field(second.a, second.b);
+      const rows = [];
+      for (const [dx, dy] of offsets) {
+        let num = 0, denA = 0, denB = 0, pairs = 0;
+        for (let row = Math.max(0, -dy); row + dy < A.height; row++) {
+          for (let col = Math.max(0, -dx); col + dx < A.width; col++) {
+            const i = row * A.width + col, j = (row + dy) * A.width + (col + dx);
+            if (!A.m[i] || !B.m[j]) continue;
+            num += A.d[i] * B.d[j]; denA += A.d[i] * A.d[i]; denB += B.d[j] * B.d[j]; pairs++;
+          }
+        }
+        rows.push([[dx, dy], Math.round(num / (Math.sqrt(denA * denB) || 1) * 100) / 100, pairs]);
+      }
+      return rows;
+    };
+  });
+  const read = () => page.evaluate(() => {
+    const counts = window.__probe.n.counts();
+    return { river: counts.river, drawCalls: counts.drawCalls, triangles: counts.triangles,
+      panel: document.querySelector('.engine-stats').textContent };
+  });
+  const setView = async (patch) => {
+    await page.evaluate((patch) => window.__probe.n.setView({ ...window.__probe.n.view(), ...patch }), patch);
+    await page.waitForTimeout(700);
+  };
+  // 这一层的开关：藏网格＝关掉这一层。两张都把手上的偏移钉回第 0 行，差值图里剩下的就只有"这一层画了什么"。
+  const setSheen = (visible) => page.evaluate((visible) => {
+    const mesh = window.__mesh();
+    mesh.visible = visible;
+    mesh.material.userData.shader.uniforms.riverScroll.value = 0;
+  }, visible);
+  const pair = async () => {
+    await page.evaluate(() => { document.querySelector('.engine-stats').style.visibility = 'hidden'; });
+    await setSheen(true);
+    await page.waitForTimeout(600);
+    const a = (await page.screenshot({ clip: CLIP })).toString('base64');
+    const on = await read();
+    await setSheen(false);
+    await page.waitForTimeout(600);
+    const b = (await page.screenshot({ clip: CLIP })).toString('base64');
+    const off = await read();
+    await setSheen(true);
+    await page.evaluate(() => { document.querySelector('.engine-stats').style.visibility = ''; });
+    return { a, b, on, off };
+  };
+
+  // ① 名单与读数：这一层坐在与水面同一批面上，片元编译过了，镜头把格子、画布与地面相位都交了进来。
+  await setView({ zoom: 15.5, pitch: 58, bearing: -25, center: { lat: 23.1105, lng: 113.3205 } });
+  const ledger = await read();
+  expect([ledger.river.faces, ledger.river.plates, ledger.river.failed.length, ledger.river.tile, ledger.river.vertices],
+    `波光这一层的读数不对：${JSON.stringify(ledger.river)}`).toEqual([41, 41, 0, 64, 8397]);
+  expect(ledger.river.built, '波光的片元没编译，那一层画不出格子').toBe(true);
+  expect([ledger.river.scale, ledger.river.center], `画布与设备倍率没交给这一层：${JSON.stringify(ledger.river.center)}`)
+    .toEqual([1, [720, 480]]);
+  expect(ledger.river.offset.every((value) => value >= 0 && value < 64),
+    `地面相位没按整格取余：${JSON.stringify(ledger.river.offset)}`).toBe(true);
+  expect(ledger.panel, `面板没把这一层报出来：${ledger.panel}`).toContain('波光 1 层');
+  // 名单同源：面板报的"水 41"与这一层的 faces 必须是同一个数，否则一边有河、一边有晕。
+  expect(Number((ledger.panel.match(/水 (\d+)/) ?? [])[1]),
+    `面板的水面名单与这一层不是一批：${ledger.panel}`).toBe(ledger.river.faces);
+
+  // ② 发数与画面量级：关掉这一层正好少一发、少 2,799 个三角形（8,397 个顶点 / 3）。
+  // 白昼那一份逐像素平均只有 0.12 个灰阶（贴图半透明、底色又接近水色），所以判据读"变了多少像素"，不读均值。
+  const day = await pair();
+  expect([day.on.drawCalls - day.off.drawCalls, day.on.triangles - day.off.triangles],
+    `关掉这一层应当正好少一发与它自己那批三角形：${JSON.stringify([day.on, day.off])}`).toEqual([1, 2799]);
+  const painted = await page.evaluate(async ({ a, b }) => window.__diff(a, b), day);
+  expect(painted.changed, `这一层只画了 ${painted.changed} 个像素，白昼的波光没上去`).toBeGreaterThanOrEqual(20000);
+  expect(painted.worst, `最亮那道波光只差 ${painted.worst} 个灰阶`).toBeGreaterThanOrEqual(12);
+
+  // ③ 屏幕上正好 64 个 CSS 像素一圈：把差值图挪一整格自比，竖直与水平都该落回同一批纹素。
+  // 米制那一种假说在 17 级上一格占 256 像素，这里就会掉到 0；倍率那一格由 Node 的 `riverScale` 判据钉住。
+  // 氛围给夜景：这一层在深色江面上振幅最大（白昼那份最亮才 23 个灰阶，掩膜太薄）。
+  await page.evaluate(() => document.querySelector('[data-atmosphere-option="night"]').click());
+  await page.waitForTimeout(1000);
+  const nightAt = { zoom: 15.5, bearing: 0 };
+  const nights = {};
+  for (const zoom of [15.5, 17, 18]) {
+    await setView({ zoom, pitch: 58, bearing: 0 });
+    const shot = await pair();
+    const lattice = await page.evaluate(async ({ a, b, offsets }) => window.__periodic(a, b, offsets),
+      { a: shot.a, b: shot.b, offsets: [[0, 64], [64, 0]] });
+    if (zoom === 15.5) nights.reference = shot;
+    nights[`z${zoom}`] = lattice;
+    expect(lattice['0,64'][0], `${zoom} 级上竖直挪一整格的相关只有 ${lattice['0,64'][0]}，这一格随缩放胀大了`)
+      .toBeGreaterThanOrEqual(0.9);
+    expect(lattice['0,64'][1], `${zoom} 级上竖直那一格只有 ${lattice['0,64'][1]} 对像素，这条判据在量噪声`)
+      .toBeGreaterThanOrEqual(3000);
+    expect(lattice['64,0'][0], `${zoom} 级上水平挪一整格的相关只有 ${lattice['64,0'][0]}`).toBeGreaterThanOrEqual(0.9);
+    expect(lattice['64,0'][1], `${zoom} 级上水平那一格只有 ${lattice['64,0'][1]} 对像素`).toBeGreaterThanOrEqual(3000);
+  }
+
+  // ④ 这一圈跟着镜头转：读数是 -转角·π/180，画面上要转过的整格才对得上，轴对齐那一格反而对不上。
+  for (const bearing of [0, -25, -40]) {
+    await setView({ zoom: 15.5, pitch: 58, bearing });
+    const shot = await pair();
+    const rad = (bearing * Math.PI) / 180;
+    const turned = [Math.round(64 * Math.sin(rad)), Math.round(64 * Math.cos(rad))];
+    expect(shot.on.river.rotate, `${bearing}° 上报出的转角是 ${shot.on.river.rotate}`).toBeCloseTo(-(bearing * Math.PI) / 180, 3);
+    const uniform = await page.evaluate(() => window.__mesh().material.userData.shader.uniforms.riverRotate.value);
+    expect(uniform, `${bearing}° 上写进材质的转角是 ${uniform}`).toBeCloseTo(-(bearing * Math.PI) / 180, 3);
+    const lattice = await page.evaluate(async ({ a, b, offsets }) => window.__periodic(a, b, offsets),
+      { a: shot.a, b: shot.b, offsets: [[0, 64], turned] });
+    const key = `${turned[0]},${turned[1]}`;
+    expect(lattice[key][0], `${bearing}° 上转过的整格 ${key} 相关只有 ${lattice[key][0]}，格子没跟着镜头转`)
+      .toBeGreaterThanOrEqual(0.9);
+    expect(lattice[key][1], `${bearing}° 上转过的整格只有 ${lattice[key][1]} 对像素`).toBeGreaterThanOrEqual(3000);
+    if (Math.abs(bearing) >= 20) {
+      expect(lattice['0,64'][0], `${bearing}° 上轴对齐那一格还有 ${lattice['0,64'][0]}，说明转角没进画面`)
+        .toBeLessThan(0.9);
+    }
+  }
+
+  // ⑤ 滚动的环：一拍一个屏幕像素、走完一整圈回到出厂那一行；停动效回到第 0 行并且画面逐像素不再变。
+  // 采样一拍一次从 Node 这侧发：整段循环放进页面里跑 8 秒，实测会把那个 execution context 弄丢。
+  await setView(nightAt);
+  await page.evaluate(() => window.__probe.n.setMotion(true));
+  const phases = [];
+  for (let step = 0; step < 12; step++) {
+    await page.waitForTimeout(700);
+    phases.push(await page.evaluate(() => {
+      const status = window.__probe.n.motionStatus();
+      return [status.phase, status.steps, window.__probe.n.counts().river.scroll];
+    }));
+  }
+  const ring = [];
+  for (let i = 1; i < phases.length; i++) {
+    const delta = phases[i][0] - phases[i - 1][0];
+    ring.push(delta >= 0 ? delta : delta + 64);
+  }
+  expect(ring.every((delta) => delta >= 3 && delta <= 9), `每 700 ms 推进的像素数不在 3~9 之间：${JSON.stringify(ring)}`)
+    .toBe(true);
+  expect(phases.every(([phase, , scroll]) => phase === scroll && phase >= 0 && phase < 64),
+    `面板的相位与这一层的相位不是同一个数，或者绕不出那一圈：${JSON.stringify(phases)}`).toBe(true);
+  expect(phases.some(([, , scroll], i) => i > 0 && scroll < phases[i - 1][2]),
+    `十二次采样没绕回过一次出厂那一行：${JSON.stringify(phases.map(([, , scroll]) => scroll))}`).toBe(true);
+  expect(phases[11][1] > phases[0][1], `拍数计数器没走：${JSON.stringify(phases)}`).toBe(true);
+  const settled = await page.evaluate(async () => {
+    const n = window.__probe.n;
+    n.setMotion(false);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return { phase: n.motionStatus().phase, scroll: n.counts().river.scroll };
+  });
+  expect([settled.phase, settled.scroll], `停动效之后没回到出厂那一行：${JSON.stringify(settled)}`).toEqual([0, 0]);
+  // 面板那几行数字每一帧都在变（FPS），藏掉之后再比这两帧，剩下的才是场景自己动不动。
+  await page.evaluate(() => { document.querySelector('.engine-stats').style.visibility = 'hidden'; });
+  const still1 = (await page.screenshot({ clip: CLIP })).toString('base64');
+  await page.waitForTimeout(1500);
+  const still2 = (await page.screenshot({ clip: CLIP })).toString('base64');
+  await page.evaluate(() => { document.querySelector('.engine-stats').style.visibility = ''; });
+  const still = await page.evaluate(async ({ a, b }) => window.__diff(a, b), { a: still1, b: still2 });
+  expect(still.changed, `停住之后画面还在动（${still.changed} 个像素变了）`).toBe(0);
+
+  // ⑥ 换氛围＝换一张真不一样的图，并把格子放回出厂那一行。
+  const switched = await page.evaluate(async () => {
+    const n = window.__probe.n;
+    n.setMotion(true);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const before = n.counts().river;
+    document.querySelector('[data-atmosphere-option="sunset"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const after = n.counts().river;
+    n.setMotion(false);
+    return { before: { scroll: before.scroll }, after: { atmosphere: after.atmosphere, scroll: after.scroll } };
+  });
+  expect(switched.before.scroll, `换氛围之前相位就是 0，这条判据没东西可复位：${JSON.stringify(switched)}`)
+    .toBeGreaterThan(2);
+  // 等待那一百二十毫秒里时钟还会走一拍，所以这里钉的是"回到出厂附近"，不是字面的 0：
+  // 注入办法是把 `setAtmosphere` 里那句 `state.scroll = 0` 拿掉，档位换了但相位停在 7 以上，当场报红。
+  expect(switched.after.atmosphere, `氛围没切过去：${JSON.stringify(switched)}`).toBe('sunset');
+  expect(switched.after.scroll, `换了氛围还留着上一档的偏移：${JSON.stringify(switched)}`)
+    .toBeLessThan(switched.before.scroll);
+  await setView({ zoom: 15.5, pitch: 58, bearing: 0 });
+  const sunset = await pair();
+  const sunsetLattice = await page.evaluate(async ({ a, b, offsets }) => window.__periodic(a, b, offsets),
+    { a: sunset.a, b: sunset.b, offsets: [[0, 64]] });
+  expect(sunsetLattice['0,64'][0], '日落档的贴图换过来就不周期了').toBeGreaterThanOrEqual(0.9);
+  // 三档各一张图：日落与夜景那两张差值图在同一个屏幕位置上必须不是同一份像素。
+  const disagree = await page.evaluate(async ({ night, sunset }) => {
+    const a = await window.__field(night.a, night.b);
+    const b = await window.__field(sunset.a, sunset.b);
+    let painted = 0, far = 0;
+    for (let i = 0; i < a.d.length; i++) {
+      if (!(a.m[i] || b.m[i])) continue;
+      painted++;
+      if (Math.abs(a.d[i] - b.d[i]) > 2) far++;
+    }
+    return { painted, far };
+  }, { night: nights.reference, sunset });
+  expect(disagree.painted, `两档的差值图里几乎没有画到的地方：${JSON.stringify(disagree)}`).toBeGreaterThan(5000);
+  expect(disagree.far, `日落与夜景画的是同一张图（只有 ${disagree.far} 个像素不同）`).toBeGreaterThan(3000);
+
+  // ⑦ 透明度读现版那条斜坡。
+  await page.evaluate(() => document.querySelector('[data-atmosphere-option="day"]').click());
+  await page.waitForTimeout(800);
+  const ramp = await page.evaluate(async () => {
+    const n = window.__probe.n;
+    const rows = [];
+    for (const zoom of [10, 12, 13, 14, 15.5, 18.5, 20, 22]) {
+      n.setView({ ...n.view(), zoom });
+      await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+      rows.push(n.counts().river.opacity);
+    }
+    return rows;
+  });
+  expect(ramp, `透明度斜坡与现版那条档表对不上：${JSON.stringify(ramp)}`)
+    .toEqual([0.4, 0.4, 0.56, 0.72, 0.72, 0.72, 0.72, 0.72]);
+
+  // ⑧ 平移锚定：镜头挪约 119 个屏幕像素，格子该跟着江面走——挪同样的 119 像素去比要对得上，原地比要对不上。
+  // 钉在视口的那一版正好反过来（原地比 1.0、挪平移量比 0.6）。现版那侧同一次测量是 0.94 对 0.81，
+  // 也就是两边都"跟着地面走"（`scripts/probe-river-pan.mjs`）；这里只在自己引擎里比，不跨引擎对像素。
+  await page.evaluate(() => document.querySelector('[data-atmosphere-option="night"]').click());
+  await page.waitForTimeout(900);
+  await setView({ zoom: 16, pitch: 0, bearing: 0, center: { lat: 23.1105, lng: 113.3205 } });
+  const anchor = await pair();
+  const home = await page.evaluate(() => {
+    const n = window.__probe.n;
+    const centre = n.view().center;
+    const point = n.screen(centre);
+    return { centre, pixel: [Math.round(point.x), Math.round(point.y)] };
+  });
+  let target = { ...home.centre };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await page.evaluate(async (c) => {
+      const n = window.__probe.n;
+      n.setView({ ...n.view(), center: c });
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }, target);
+    const now = await page.evaluate((home) => {
+      const here = window.__probe.n.screen(home.centre);
+      return [Math.round(here.x) - home.pixel[0], Math.round(here.y) - home.pixel[1]];
+    }, home);
+    if (Math.abs(now[0] - 119) <= 2 && Math.abs(now[1] - 119) <= 2) break;
+    target = { lat: target.lat + (119 - now[1]) / 110540,
+      lng: target.lng - (119 - now[0]) / (111320 * Math.cos(target.lat * Math.PI / 180)) };
+  }
+  const moved = await page.evaluate((home) => {
+    const here = window.__probe.n.screen(home.centre);
+    return [Math.round(here.x) - home.pixel[0], Math.round(here.y) - home.pixel[1]];
+  }, home);
+  // 对准要钉在 2 像素以内：这张格子的周期只有 64 像素，平移量差 8 像素对齐度就从 0.93 掉到 0.72（`scripts/probe-river-pan.mjs`）。
+  expect(Math.abs(moved[0] - 119) <= 2 && Math.abs(moved[1] - 119) <= 2,
+    `这次平移没对准 119 个屏幕像素：${JSON.stringify(moved)}`).toBe(true);
+  const panned = await pair();
+  expect(panned.on.river.offset, `平移之后地面相位没动：${JSON.stringify([anchor.on.river.offset, panned.on.river.offset])}`)
+    .not.toEqual(anchor.on.river.offset);
+  const aligned = await page.evaluate(async ({ anchor, panned, moved }) => window.__align(anchor, panned,
+    [[0, 0], moved, [moved[0] + 32, moved[1] + 32]]), { anchor, panned, moved });
+  console.log('⑧ 对齐面：', JSON.stringify(aligned));
+  const [atZero, atPan, atHalf] = aligned;
+  expect(atPan[2], `平移对齐只有 ${atPan[2]} 对像素，这条判据在量噪声：${JSON.stringify(aligned)}`).toBeGreaterThanOrEqual(3000);
+  expect(atHalf[2], `错开半格只有 ${atHalf[2]} 对像素，这个对照量的是噪声：${JSON.stringify(aligned)}`).toBeGreaterThanOrEqual(3000);
+  expect(atPan[1], `格子没跟着江面走：挪 ${JSON.stringify(moved)} 像素去比对齐度只有 ${atPan[1]}（同屏比 ${atZero[1]}）`)
+    .toBeGreaterThanOrEqual(0.85);
+  expect(atPan[1], `同屏位置比反而更对齐（${atZero[1]} 对 ${atPan[1]}），格子又钉回视口了`)
+    .toBeGreaterThan(atZero[1] + 0.05);
+  // 对照为什么不取"反着挪"：那一次两边只剩 17 对像素（实测），相干度 0.9 是 17 个点凑出来的，不能当对照。
+  // 取"沿同一个方向再多错半格"这一头：像素对有上万个，峰如果真是格子周期给的，这里就该掉下来。
+  expect(atPan[1], `错开半格也对齐到 ${atHalf[1]}，这个峰不是格子的周期带来的`)
+    .toBeGreaterThan(atHalf[1] + 0.05);
+
+  expect(errors, `江面波光这一层跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
 });

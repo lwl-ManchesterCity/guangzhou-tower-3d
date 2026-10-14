@@ -19,6 +19,14 @@ export const cameraToCentre = (height) => 0.5 / Math.tan(radians(CAMERA_FOV) / 2
 export const distanceForZoom = ({ zoom, height, latitude }) =>
   cameraToCentre(height) * worldAtEquator * Math.cos(radians(latitude)) / (CAMERA_TILE * 2 ** zoom);
 
+/**
+ * MapLibre 那一格屏幕（一个 CSS 像素）在这一纬度这一级缩放下占多少米。
+ * 江面的波光要用它把"米"换回"屏幕像素"：贴图在屏幕上必须正好一格 64 个 CSS 像素，
+ * 而它铺的位置要跟着地面走，所以铺得开的距离按米读、格子的大小按这一格换。
+ */
+export const metresPerPixel = ({ zoom, latitude }) =>
+  worldAtEquator * Math.cos(radians(latitude)) / (CAMERA_TILE * 2 ** zoom);
+
 /** The inverse, so a dragged camera can be written back into the hash. */
 export const zoomForDistance = ({ distance, height, latitude }) =>
   Math.log2(cameraToCentre(height) * worldAtEquator * Math.cos(radians(latitude)) / (distance * CAMERA_TILE));

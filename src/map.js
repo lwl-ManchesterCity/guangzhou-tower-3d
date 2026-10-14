@@ -15,7 +15,7 @@ import { heightColor, heightSummary, lensFilter, UNKNOWN_HEIGHT_COLOR } from './
 import { addGrounds, groundColors } from './grounds.js';
 import { schematicDisplayHeights } from './block-layout.js';
 import { FACADE_SHAPES, FACADE_THEMES, GLOW_IMAGE_PREFIX, GLOW_NEAR_IMAGE_PREFIX, LAMP_ALT_IMAGE_PREFIX, LAMP_NEAR_ALT_IMAGE_PREFIX, LAMP_GROUPS, LAMP_KEYS, LAMP_PERIODS_MS, LIGHT_BANDS, LIGHT_FADES, LIGHT_IMAGE_PREFIX, LIGHT_NEAR_IMAGE_PREFIX, LIGHT_NEAR_ZOOM, LIGHT_TEMPERATURES, WINDOWS_OFF_IMAGE, facadeImage, facadeOptions, facadePattern, facadeTexture, glowTexture, lampBreather, lampDarkness, lampTemperatureDeal, lampWeight, lightTexture, lampBandExpression, windowsOffTile } from './facade.js';
-import { WATER_IMAGE_PREFIX, WATER_THEMES, scrollWater, waterTexture } from './water.js';
+import { WATER_IMAGE_PREFIX, WATER_THEMES, riverOpacityExpression, scrollWater, waterTexture } from './water.js';
 import { BRIDGE_DECK, BRIDGE_PARAPET, BRIDGE_SOURCE, bridgeLayers } from './bridges.js';
 import { MARCH_PHASES, TRAFFIC_BAND, TRAFFIC_FLOW, TRAFFIC_STEP_MS, TRAFFIC_TAIL, marchPair, trafficLayers } from './traffic.js';
 import { deckHeights, trafficSprite } from './traffic-life.js';
@@ -270,7 +270,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
       id: 'river-surface', type: 'fill', source: 'openmaptiles', 'source-layer': 'water',
       paint: {
         'fill-pattern': `${WATER_IMAGE_PREFIX}-day`,
-        'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, 0.4, 14, 0.72, 18.5, 0.72],
+        'fill-opacity': riverOpacityExpression(),
       },
     }, water < 0 ? undefined : style.layers[water + 1]?.id);
     // Traffic light sits above every road the basemap draws and below the volumes, so a ribbon runs along the street

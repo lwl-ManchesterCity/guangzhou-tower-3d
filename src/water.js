@@ -100,3 +100,22 @@ export function scrollWater(image, offset) {
   }
   return { width, height, data, dashes: image.dashes ?? 0 };
 }
+
+// 波光层的透明度斜坡。原来只写在 `map.js` 那条 `river-surface` 的 `fill-opacity` 表达式里，新引擎每帧要自己求值同一个数，
+// 所以把档表挪到这里，两边读同一份：现版把它摊平成表达式，引擎按分段线性插值。
+export const RIVER_OPACITY_STOPS = [[12, 0.4], [14, 0.72], [18.5, 0.72]];
+
+/** 现版那侧要的 MapLibre 表达式（12 级以下江面还只是一条平色河带，14 级起满档）。 */
+export const riverOpacityExpression = () => ['interpolate', ['linear'], ['zoom'], ...RIVER_OPACITY_STOPS.flat()];
+
+/** 新引擎那侧要的同一个斜坡，按镜头层级求值；低于首档取首值、高于末档取末值。 */
+export function riverOpacityFor(zoom) {
+  if (!(zoom > RIVER_OPACITY_STOPS[0][0])) return RIVER_OPACITY_STOPS[0][1];
+  for (let index = 1; index < RIVER_OPACITY_STOPS.length; index++) {
+    const [from, fromValue] = RIVER_OPACITY_STOPS[index - 1];
+    const [to, toValue] = RIVER_OPACITY_STOPS[index];
+    if (zoom <= to) return fromValue + (toValue - fromValue) * ((zoom - from) / (to - from));
+  }
+  return RIVER_OPACITY_STOPS.at(-1)[1];
+}
+

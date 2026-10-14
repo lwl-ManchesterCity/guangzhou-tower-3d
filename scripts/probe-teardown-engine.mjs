@@ -24,7 +24,7 @@ const census = await page.evaluate(() => {
     if (!item || seen.has(item)) return;
     seen.add(item);
     const ordinal = rows.length;
-    rows.push({ ordinal, kind, owner: owner(object), label: item.type ?? kind, fired: false });
+    rows.push({ ordinal, kind, owner: owner(object), label: item.name || item.type || kind, fired: false });
     item.addEventListener('dispose', () => { rows[ordinal].fired = true; });
   };
   window.__probe.n.scene.traverse((object) => {
@@ -32,11 +32,16 @@ const census = await page.evaluate(() => {
     for (const material of [].concat(object.material ?? [])) {
       add(material, 'material', object);
       for (const value of Object.values(material)) if (value && value.isTexture) add(value, 'texture', object);
+      // 片元注入那几份材质把贴图握在 shader.uniforms 里，翻材质属性看不见。
+      for (const uniform of Object.values(material.userData?.shader?.uniforms ?? {})) {
+        if (uniform?.value?.isTexture) add(uniform.value, 'texture', object);
+      }
     }
   });
   window.__ledger = rows;
   const near = window.__probe.n.nearTraffic();
   return { rows: rows.length, byKind: rows.reduce((a, r) => { a[r.kind] = (a[r.kind] ?? 0) + 1; return a; }, {}),
+    textures: rows.filter((r) => r.kind === 'texture').map((r) => `${r.owner}/${r.label ?? '(无名)'}`),
     near: near && { cars: near.cars, walkers: near.walkers, boats: near.boats, signals: near.signals } };
 });
 console.log('场景里的可还资源：', JSON.stringify(census));

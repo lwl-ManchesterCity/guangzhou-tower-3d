@@ -466,6 +466,72 @@ Chrome另做实际鼠标点选：桌面三主题及390／320／568三种小屏�
 
 **撤销。** ① 删 `src/engine/bloom.js`；② `src/engine/scene.js`：删 `createBloom` 的 import、`bloom`/`bloomShare`/`nightNow`/`setBloomShare`/`ensureBloom`/`sync` 那一块、`resize` 里的 `bloom?.setSize`、`renderer.info.autoReset = false` 与帧首的 `renderer.info.reset()`（还原成默认自动清零）、`frame` 里那句 `if (nightNow()) … else`（改回一句 `renderer.render`）、`setMode` 里的 `setBloomShare`、API 里 `counts()` 的 `bloom` 一格与 `setBloom`/`bloomState` 两个阀门、`dispose` 里的 `bloom?.dispose()`；③ `tests/engine.browser.spec.js`：删 `blooms its night lamps…` 那一项，"八层各一发"改回跨档比 `night.trafficFree − day.trafficFree = 8`（并删掉同档藏八层那一段与 `[-6,-6,5]` 的教训注释），"灯火开合 <15 %"那一对去掉先关泛光/后开满档的两笔；④ 删 `docs/screenshots/canton-bloom-*.png` 与 `scripts/{probe-bloom-engine,probe-bloom-cost,probe-bloom-control,shot-bloom}.mjs`；⑤ 删本节。**现版那一侧、样式图层、数据快照与亮度档表本轮一字未动。**
 
+### 江面那层波光进新引擎：格子还是屏幕的，起点改成了地面的（2026-10-14，#170 剩下的两格里先做的那一格 #189）
+
+项 5 剩下的两格不是动效开关而是资产搬迁：现版的江面是"水色一层 `fill` ＋ 波光一层 `fill-pattern`"，塔身壳体是 `src/tower.js` 里另一套 `THREE.Scene`。这一格先做，因为波光的资产本来就在 `src/water.js`（`waterTexture` 是纯函数，Node 里也造得出来），搬的是**用法**不是像素；壳体那一格仍欠（#190）。
+
+**① 形状照现版。** 新引擎这边是一块与水面**同名单、同几何**的覆盖网格（`src/engine/river.js`）：41 面水系 → 41 块拼成 1 张网格、8,397 个顶点、2,799 个三角形，材质 `MeshBasicMaterial` 不受光、`depthWrite:false`、`DoubleSide`（41 面里有反的环），抬高 0.02 m 坐在水面那一档 0.2 与路带 0.3 之间。名单同源靠同一个 `toneOf`，所以面板报的"水 41"与这一层的 faces 必须是同一个数——一边有河、一边有晕这种错判据直接钉死。
+
+**② 一块平铺的覆盖层在 three 里默认画两遍。** `transparent + DoubleSide` 让 three 为透明体排序走两遍，症状是"加一块网格、多发两枪"。归因不是猜：把 `renderer.renderBufferDirect` 包一层打印 `[object.name, front, back]`，读到 `river-sheen-water` 的两行（0/1 与 0/0）。`forceSinglePass: true` 之后"关掉这一层"正好等于 **−1 发／−2,799 个三角形**（25→24 发、250,043→247,244 三角形）。剔除仍然关着，所以反环照样画。
+
+**③ 屏幕上正好 64 个 CSS 像素一圈，不随缩放胀大。** 片元读 `gl_FragCoord`（设备像素）除以 `riverScale`（设备倍率）再 `fract` 平铺——不退回米制 uv，因为这块几何压根没有 uv 属性；mipmap 关着（非整数倍率会把 crest 与 trough 平均成一团灰）。夜景同一张"开减关"差值图自比：**15.5 级 C(0,64)=0.99（10,556 对）／C(64,0)=1.00（18,785 对），17 级 1.02／1.02，18 级 1.03／1.03**。13 级那一档屏上水面太薄（只剩 116 对像素），所以判据从 15.5 起。
+
+**④ 这一圈跟着镜头转，不跟画布。** `riverRotate = -bearing·π/180`（MapLibre 的 bearing 是"地图顺时针转多少度"，画面上的格子要反向）。镜头转 25°，画面上该让位给转过的整格 `[−27, 58]`：实测 **0.94（7,948 对）**，而轴对齐那格 `[0, 64]` 掉到 **0.59**；转 40° 时 `[−41, 49]` 0.95 对 0.76。
+
+**⑤ 滚动是一个环，不是每拍重传一张图。** 现版每拍把瓦片逐行搬一次像素（`scrollWater(tile, phase)`），这里只挪一个 uniform：`riverScroll` 整数加一拍、按 64 取余（绕回一行的环与那句逐字对应）。开动效后 12 次采样 `[phase, steps, scroll]` 是 5,11,17,23,29,35,40,46,52,58,**0**,6——每 700 ms 推进 5~6 个屏幕像素、第 11 次绕回出厂那一行，面板的相位与这一层的相位是同一个数；停动效回到 `[0, 0]`，此后隔 1.5 s 的两帧**逐像素 0 变化**（比这一格要先把读数面板藏掉：FPS 那几行每帧都在写，不藏就稳定报 30 颗像素）。
+
+**⑥ 三档三张图：换氛围＝换 sampler，并把格子放回出厂那一行。** 与现版 `swapArt` 里那句"三张都重写成 `scrollWater(tile, 0)`"同一件事（实测夜景相位 7 → 切日落 → 1）。同一档重复切不清零——按一下按钮不该让江面当众跳一行。夜景与日落那两张差值图在同一屏幕位置上差 5,000 颗像素以上，三张是真三张。
+
+**⑦ 透明度读同一条斜坡。** 原来只写在 `map.js` 那条 `fill-opacity` 里的表达式提成 `riverOpacityExpression()`（`src/water.js`），两侧读同一份 `RIVER_OPACITY_STOPS`；摊平出来逐字相同 `[12,0.4],[14,0.72],[18.5,0.72]`，八档读数 `[0.4, 0.4, 0.56, 0.72, 0.72, 0.72, 0.72, 0.72]`。引擎每帧都要问一次这个数，所以按 **1/20 级归档**：镜头停在同一档里写 0 次，跨一档写 1 次。
+
+**⑧ 这一格最早做错的地方：格子的起点钉在哪。** 现版那侧量过两件事，而且它们是分开成立的——一张图在屏幕上占多宽（不随缩放走），以及这张图的**相位钉在地面上**。第一版只做对了前者，也就是整张格子跟着视口走：把镜头挪 119 个屏幕像素，现版那侧的差值图挪同样的 119 像素去比对齐 **0.94**、原地比 **0.81**，而那一版的新引擎是原地比最高（0.64 对 1.00 那个形状），说明它压根没跟着地面动。现在补一个 `riverOffset`：镜头中心那一点的米制地面坐标 ÷ `metresPerPixel(zoom, lat)`（新加在 `engine/camera.js`，就是引擎自己那条 zoom↔距离映射的倒数），按整格 64 取余后交进片元。判据那一次实测：**按平移量比对齐 0.89（31,181 对）、同屏比 0.59（3,125 对）、沿同方向再多错半格 0.71（11,630 对）**；两引擎并排的探针给新引擎 0.93、现版 0.94。取余不是洁癖——顺着江走上十分钟这个数就涨到几万，`fract` 前那步减法会把浮点精度吃掉。
+**没有去追 MapLibre 每片瓦的相位律**：现版那侧在幅度敏感的"逐像素符合率"上任何单一平移都对不齐（雾与底色会漂），所以这一格钉的是"跟着地面走"这件事本身，两台引擎各自量各自的。
+
+**画面证据。** 同一机位（17.6 级压着水面）开与关各一张：[有这一层](docs/screenshots/canton-river-engine-close-176.png) 与 [关掉这一层](docs/screenshots/canton-river-engine-close-176-off.png)；[现版那侧同一处水面](docs/screenshots/canton-river-legacy-close-176.png)（取景不逐像素对齐，见 #191）；[新引擎开屏夜景](docs/screenshots/canton-river-engine-hero-night.png)——面板那一行从此是"… 灯火 8 层 / **波光 1 层** / 江上 18 船 …"。
+
+**判据与注入。** Node 新增 `tests/river.test.js` **10 项**（三档贴图与现版逐字节同源、名单同源、抬高那一档不许压上路带、斜坡与 1/20 归档、环、换氛围、没有水系那侧照样造得出也拆得干净、片元是屏幕空间且不带非 ASCII、材质 flags、teardown 台账）；浏览器新增 `the new engine lays the river sheen on the same water with a screen-sized tile that rides the ground` 一条八格（①–⑧ 各一格）。**注入 17 处逐条对上**：Node 侧 8 条（`scripts/inject-river-node.mjs`：去掉 `forceSinglePass`／`setView` 不吃镜头中心／片元里删掉 `riverOffset`／删程序缓存键／不还那三张贴图／开 mipmap／滚动不绕回／抬高压进路带），浏览器侧 9 条（`scripts/inject-river-browser.mjs`：格子钉回视口／丢掉 bearing／不交画布中心／去掉单通道／换氛围不清相位／滚动不绕回／透明度钉死 0.72／还资源不摘节点／不还几何），每条先证明文件真被改过、跑完逐字还原。
+
+**teardown 那本台账因此从 68 样变 71 样**（29 几何／31 材质／11 贴图），并且多走了一处：这块材质的贴图握在 `shader.uniforms` 里、翻材质属性看不见，所以台账要遍历 uniform——顺带抓出 three.js 自己那颗全局 `DFG_LUT`（它挂在每份 shader 的 uniform 里，第一个被遍历到的材质替它背名下，报成 `texture:river-sheen-water:DFG_LUT`；归属不在本场景，台账按名字跳过它）。`river-sheen` 也进了"拆完必须清空"的组名单。
+
+**已知边界**：① 跨引擎不互差像素——现版 `map.setPadding()` 让同一串 hash 两边取景差 140×70 px（#191），所以这八格判据全在引擎自己内部比；② 这一层不进 V7 那张亮度预算账（它只带 alpha、不写深度，档表本来是在现版那侧量的）；③ 景泰那侧没有水系，`mesh` 是 null，但三张贴图照样要还（Node 钉）；④ 面板那行还写着 `V8 Phase 2`——改它会动引擎截图的像素基线，本轮没动。
+
+**本轮的数。** Node **685 项全绿**（上一轮 675 ＋ 10）；引擎那一册 **11 项全绿**。整套 **78 条：76 通过／0 红／2 明确 `skip`／35.4 分钟**（`--workers=1`，这一遍从头跑完没有红，也没有需要单独复跑的超时）。`npm run build` 通过：`boot` 30.85 kB（gzip 12.41，**+4.67 kB**——river.js 落在这块，按 `riverOffset` 逐字节查过只有这一块命中）、`index` 133.71（50.31）、`landmarks` 49.92（21.06）、`three` 619.77（154.99）、`maplibre` 1,038.85（280.06）、`index.css` 33.97（7.50）；`three` 与 `maplibre` 一字未动。产物隐私扫描 25 个文件按 `.env.local` 那把 key 逐字节零命中，32 位十六进制 1 条仍是 `jingtai-metadata.json` 里那个归档 MD5，不是凭据。**发布未触碰。**
+
+**撤销。** ① 删 `src/engine/river.js` 与 `tests/river.test.js`；② `src/engine/scene.js`：删 `createRiverSheen` 的 import、`river` 那一处构造、`scene.add` 里的 `river.group`、动效那四格（`river.advance`/`river.reset`/`motionAvailable()` 里的 `river.mesh`/`motionStatus()` 里那两行 `sheen`）、帧循环里的 `river.setView`、面板那句"波光 N 层"、`counts()` 的 `river` 一格、`setMode` 里的 `river.setAtmosphere`、`dispose` 里的 `river.dispose()`；③ `src/engine/camera.js`：删 `metresPerPixel` 那个 export（目前只有波光在用）；④ `src/water.js` 与 `src/map.js`：把 `RIVER_OPACITY_STOPS`/`riverOpacityExpression`/`riverOpacityFor` 三处改回 `map.js` 里那条内联表达式（**摊平后逐字节相同**，现版画面不变）；⑤ `tests/engine.browser.spec.js`：删 `lays the river sheen …` 那一项，台账退回 `{geometry: 28, material: 30, texture: 10}`、去掉遍历 `shader.uniforms` 那三行与 `DFG_LUT` 那一格、组名单去掉 `river-sheen`；⑥ 删 `docs/screenshots/canton-river-{engine,legacy}-*.png` 与 `scripts/{probe-river-engine,probe-river-checks,probe-river-pan,probe-river-anchor,shot-river-anchor,shot-river-engine,inject-river-node,inject-river-browser}.mjs`；⑦ 删本节。**楼块、窗纹、灯火、近场、泛光链、样式图层与数据快照本轮一字未动。**
+
+### 江面那层波光进新引擎：一块与水面包同几何的覆盖网格（2026-10-14，#170 剩下的两格里先做的那一格）
+
+项 5 剩下的两格不是动效开关而是资产搬迁（#170）。这一轮把**江面波光**那一格做完了（#189），壳体那一格仍欠（#190）。做法不是把现版那套瓦片搬过来，而是**沿用现版的分层形状**：现版的江面是"底下一层 `fill` 出水色、上面一层 `fill-pattern` 只带 alpha 出波光"（分两层是因为 MapLibre 的 `fill-pattern` 会让着色器无视 `fill-color`），新引擎这边就是在水面那块单色板上再压一块**同几何的覆盖网格**，像素仍然出自 `src/water.js` 那三张 `waterTexture`——**改一处两边一起变**，Node 那侧逐字节钉着这份同源。
+
+**① 名单同源，不是又数一遍。** 挑面的判据就是地面那一层用的同一个 `toneOf`：广州塔这一侧 **41 面水系 → 41 块拼成 1 张网格、8,397 个顶点、2,799 个三角形**，抬 0.02 m 坐在水面那一档（0.2 m）之上、路带那一档（0.3 m）之下——爬上路带就是画错，判据把这两头都钉住。面板报的"水 41"与这一层的 faces 必须是同一个数，否则一边有河、一边有晕。
+
+**② 一块平铺的覆盖层在 three 里默认画两遍。** 接上这一层之后发数从 24 变 **26**（不是 25）——归因不是猜的：把 `renderer.renderBufferDirect` 包一层打印 `[object.name, front, back]`，读到 `river-sheen-water` 的两行（`0,1` 与 `0,0`），也就是 `transparent + DoubleSide` 让 three 为透明体排序走了正反两遍。双面不能砍（41 面里有反的环），但一块平铺覆盖层没有互相遮挡的关系可排，白付一发；`forceSinglePass: true` 之后**关掉这一层正好等于 −1 发／−2,799 个三角形**（25→24 发、250,043→247,244 三角形）。
+
+**③ 屏幕上正好 64 个 CSS 像素一圈，不随缩放胀大。** 片元里读 `gl_FragCoord`（设备像素）除以 `riverScale`（设备倍率），再 `fract` 平铺——**不退回米制 uv**（这块几何根本没有 uv 属性），mipmap 关着（非整数倍率会把 crest 与 trough 平均成一团灰，波光就没了）。判据是拿"开减关"的差值图自己挪一整格自比：15.5 级 **0.99／1.00**（竖直 10,556 对、水平 18,785 对）、17 级 **1.02／1.02**、18 级 **1.03／1.03**——放大五级还是 64 像素。13 级那一档屏上水面太薄（只剩 116 对像素），所以判据从 15.5 起，别拿一条在量噪声的数当证据。
+
+**④ 这一圈跟着镜头转，不跟画布。** `riverRotate = -bearing·π/180`（MapLibre 的 bearing 是"地图顺时针转多少度"，画面上的格子要反向才跟得上地面）。镜头转 25°，画面上该让位给转过的整格 `[−27, 58]`：实测 **0.94（7,948 对）**，而轴对齐那格 `[0, 64]` 掉到 **0.59**；转 40° 时 `[−41, 49]` **0.95** 对 0.76。读数与写进材质的那个数也各自钉一遍（`toBeCloseTo(-(bearing·π)/180, 3)`），免得"画面碰巧对、数交错了"。
+
+**⑤ 滚动是一个环，不是每拍重传一张图。** 现版每拍把瓦片逐行搬一次像素（`scrollWater(tile, phase)`），这里只挪一个 uniform：`riverScroll` 整数加一拍、按 64 取余，绕回一行的环与那句逐字对应。开动效后 12 次采样 `[相位, 拍数, 这一层的偏移]` 是 5,11,17,23,29,35,40,46,52,58,**0**,6——每 700 ms 推进 5~6 个屏幕像素、第 11 次绕回出厂那一行，并且**面板的相位与这一层的相位是同一个数**。停动效回到 `[0, 0]`，此后隔 1.5 s 的两帧**逐像素 0 变化**（这一格踩过一次坑：读数面板的 FPS 每帧都在写，不藏掉就稳定报 30 颗像素在变）。
+
+**⑥ 三档三张图：换氛围＝换 sampler，并把格子放回出厂那一行。** 与现版 `swapArt` 里那句"三张都重写成 `scrollWater(tile, 0)`"同一件事（实测夜景相位 7 → 切日落 → 1；同一档重复切不清零，不然按一下按钮江面当众跳一行）。日落档的格子照样周期，夜景与日落那两张差值图在同一屏幕位置上差 5,000 颗像素以上——三张是真三张，不是同一张调了透明度。
+
+**⑦ 透明度读同一条斜坡，并且只在跨 1/20 级时重写。** 原来那条 `fill-opacity` 表达式只写在 `map.js` 里，现在提成 `riverOpacityExpression()`（`src/water.js`），两侧读同一份 `RIVER_OPACITY_STOPS`，摊平出来逐字相同 `[12,0.4],[14,0.72],[18.5,0.72]`；引擎每帧都要问一次这个数，所以按 **1/20 级归档**：镜头停在同一档里写 0 次、跨一档写 1 次（这一格用属性拦截器数写入次数，不然"归档"这句话没有可核对的落点）。
+
+**⑧ 这一格最早做错的地方：格子的起点钉在哪。** 现版那侧量过两件事，而且它们是**分开成立**的——一张图在屏幕上占多宽（不随缩放走），以及这张图的**相位钉在地面上**。第一版只做对了前者，也就是整张格子跟着视口走：把镜头挪 119 个屏幕像素，现版那侧的差值图挪同样的 119 像素去比对齐 **0.94**、原地比 **0.81**，而那一版的新引擎是**原地比最高、挪平移量比反而掉到 0.64** 那个形状——说明它压根没跟着地面动。现在补一个 `riverOffset`：镜头中心那一点的米制地面坐标 ÷ `metresPerPixel(zoom, lat)`（新加在 `engine/camera.js`，就是引擎自己那条 zoom↔距离映射的倒数），按整格 64 取余后交进片元。判据那一次实测：**按平移量比对齐 0.89（31,181 对）、同屏比 0.59（3,125 对）、沿同方向再多错半格 0.71（11,630 对）**；两引擎并排的探针给新引擎 **0.93**、现版 **0.94**。取余不是洁癖——顺着江走上十分钟这个数就涨到几万，`fract` 前那步减法会把浮点精度吃掉。
+**没有去追 MapLibre 每片瓦的相位律**：现版那侧在幅度敏感的"逐像素符合率"上任何单一平移都对不齐（雾与底色会漂），所以这一格钉的是"跟着地面走"这件事本身，两台引擎各自量各自的。
+
+**画面证据。** 同一机位（17.6 级压着水面）开与关各一张：[有这一层](docs/screenshots/canton-river-engine-close-176.png) 与 [关掉这一层](docs/screenshots/canton-river-engine-close-176-off.png)；[现版那侧同一处水面](docs/screenshots/canton-river-legacy-close-176.png)（取景不做逐像素对齐，见 #191）；[新引擎开屏夜景](docs/screenshots/canton-river-engine-hero-night.png)——面板那一行从此是"… 灯火 8 层 / **波光 1 层** / 江上 18 船 …"。
+
+**判据与注入。** Node 新增 `tests/river.test.js` **10 项**（三档贴图与现版逐字节同源、名单同源、抬高那一档不许压上路带、斜坡与 1/20 归档、滚动那个环、换氛围、没有水系那侧照样造得出也拆得干净、片元是屏幕空间且不含非 ASCII、材质 flags、teardown 台账 5 样）；浏览器新增 `the new engine lays the river sheen on the same water with a screen-sized tile that rides the ground` 一条 **①–⑧ 八格**。**注入 17 处逐条对上**：Node 侧 8 条（`scripts/inject-river-node.mjs`：去掉 `forceSinglePass`／`setView` 不吃镜头中心／片元里删掉 `riverOffset`／删程序缓存键／不还那三张贴图／开 mipmap／滚动不绕回／抬高压进路带），浏览器侧 9 条（`scripts/inject-river-browser.mjs`：格子钉回视口／丢掉 bearing／不交画布中心／去掉单通道／换氛围不清相位／滚动不绕回／透明度钉死 0.72／还资源不摘节点／不还几何），每条先证明文件真被改过、跑完逐字还原。
+
+**teardown 那本台账因此从 68 样变 71 样**（29 几何／31 材质／11 贴图），并且多走了一处：这块材质的贴图握在 `shader.uniforms` 里、翻材质属性看不见，所以台账要遍历 uniform——顺带抓出 three.js 自己那颗全局 `DFG_LUT`（它挂在每份 shader 的 uniform 里，第一个被遍历到的材质替它背名下，报成 `texture:river-sheen-water:DFG_LUT`；归属不在本场景，台账按名字跳过它）。`river-sheen` 也进了"拆完必须清空"的组名单。
+
+**已知边界**：① 跨引擎不互差像素——现版 `map.setPadding()` 让同一串 hash 两边取景差 140×70 px（#191），所以这八格判据全在引擎自己内部比；② 这一层不进 V7 那张亮度预算账（它只带 alpha、不写深度，档表本来是在现版那侧量的）；③ 景泰那侧没有水系，`mesh` 是 null，但三张贴图照样要还（Node 钉）；④ 面板那行还写着 `V8 Phase 2`——改它会动引擎截图的像素基线，本轮没动。
+
+**本轮的数。** Node **685 项全绿**（上一轮 675 ＋ 10）；引擎那一册 **11 项全绿**。整套 **78 条：76 通过／0 红／2 明确 `skip`／35.4 分钟**（`--workers=1`，这一遍从头跑完没有红，也没有需要单独复跑的超时）。`npm run build` 通过：`boot` 30.85 kB（gzip 12.41，**+4.67 kB**——river.js 落在这块，按 `riverOffset` 逐字节查过只有这一块命中）、`index` 133.71（50.31，−1.19）、`landmarks` 49.92（21.06，+1.49）、`three` 619.77（154.99）、`maplibre` 1,038.85（280.06）、`index.css` 33.97（7.50）；`three` 与 `maplibre` 一字未动，index／landmarks 那两笔是 `water.js` 与 `map.js` 之间那次提取带来的分包重新归置（现版那侧摊平后的表达式逐字节相同）。产物隐私扫描 25 个文件按 `.env.local` 那把 key 逐字节零命中，32 位十六进制 1 条仍是 `jingtai-metadata.json` 里那个归档 MD5，不是凭据。**发布未触碰。**
+
+**撤销。** ① 删 `src/engine/river.js` 与 `tests/river.test.js`；② `src/engine/scene.js`：删 `createRiverSheen` 的 import、`river` 那一处构造、`scene.add` 里的 `river.group`、动效那四格（`river.advance`／`river.reset`／`motionAvailable()` 里的 `river.mesh`／`motionStatus()` 里那两行 `sheen`）、帧循环里的 `river.setView`、面板那句"波光 N 层"、`counts()` 的 `river` 一格、`setMode` 里的 `river.setAtmosphere`、`dispose` 里的 `river.dispose()`；③ `src/engine/camera.js`：删 `metresPerPixel` 那个 export（目前只有波光在用）；④ `src/water.js` 与 `src/map.js`：把 `RIVER_OPACITY_STOPS`／`riverOpacityExpression`／`riverOpacityFor` 三处改回 `map.js` 里那条内联表达式（**摊平后逐字节相同**，现版画面不变）；⑤ `tests/engine.browser.spec.js`：删 `lays the river sheen …` 那一项，台账退回 `{geometry: 28, material: 30, texture: 10}`、去掉遍历 `shader.uniforms` 那三行与 `DFG_LUT` 那一格、组名单去掉 `river-sheen`；⑥ 删 `docs/screenshots/canton-river-{engine,legacy}-*.png` 与 `scripts/{probe-river-engine,probe-river-checks,probe-river-pan,probe-river-anchor,shot-river-anchor,shot-river-engine,inject-river-node,inject-river-browser}.mjs`；⑦ 删本节。**楼块、窗纹、灯火、近场、泛光链、样式图层与数据快照本轮一字未动。**
+
 ### 页面外那四项：仓库有了基线、引擎把边界写在界面上、一条快子集、拆场景把资源还回去（2026-10-13～14，优化清单页面外第 8／10／11 项与遗留 #177）
 
 页面内 1／2／3／5／6／7 做完之后接着做页面外这一批。四项的共同点是**都不改画面**：一份版本控制、一句界面说明、一条命令口径、一次 teardown 还账。
@@ -476,7 +542,7 @@ Chrome另做实际鼠标点选：桌面三主题及390／320／568三种小屏�
 
 **③ 第 11 项：`npm run test:smoke`。** 整套 77 条要 40 分钟上下，改一行代码等不起。快子集挑的是"页面起得起、两条渲染路径的主线还在"那 5 条：现版近场那一条（车、人、半径）＋引擎那四条（挂载与全量楼块、近场与交叉淡、夜景泛光、边界说明与缩放按钮）。实测 **5 通过／1.9 分钟**（`--workers=1`）。这一条本轮量过两次，第一次撞上机器被别的东西压着、同样 5 条跑了 **18 分钟**——所以 1.9 分钟是这台机器安静时的口径，不是"这条命令保证 2 分钟"，判据里没有时长门槛，别拿它当门槛读。
 
-**④ #177：拆场景时把几何、材质与贴图还回去。** 盘点办法不是读代码猜谁漏了，是把台账列出来：遍历 `scene`，每个 `geometry`／`material`／挂在材质上的贴图各点一次名、挂一个 `dispose` 监听，喊一次 `dispose()` 之后看谁没响（`scripts/probe-teardown-engine.mjs`，白昼与夜景各跑一遍）。出厂机位那一帧的台账是 **68 样：28 几何／30 材质／10 贴图**。修之前漏三处，全是"没人喊"：
+**④ #177：拆场景时把几何、材质与贴图还回去。** 盘点办法不是读代码猜谁漏了，是把台账列出来：遍历 `scene`，每个 `geometry`／`material`／挂在材质上的贴图各点一次名、挂一个 `dispose` 监听，喊一次 `dispose()` 之后看谁没响（`scripts/probe-teardown-engine.mjs`，白昼与夜景各跑一遍）。出厂机位那一帧的台账是 **68 样：28 几何／30 材质／10 贴图**（2026-10-14 江面波光进来之后这本账变 **71 样＝29／31／11**，并且要多走一处 `shader.uniforms`，见上一节）。修之前漏三处，全是"没人喊"：
 
 - **近场那三组与楼根接地带整批没还**（#177 原本那一格）。`src/engine/scene.js` 的 `dispose()` 只收自己那五块（`rig`/`ground`/`buildings`/`facades`/两张图集贴图），而车、人、船、湿线、灯那几组是调用方建好喂进来的客人。各家的底细不一样：**车那一组根本没有 `dispose`**，**船那组只有两句、还了两块几何**（材质与组里的节点都没还），灯／湿线／楼根带三家早就备着完整的一句，但装配器那层没有口令，引擎这一侧也就没人喊它们。现在各组自己还清、还清之后把组里的节点摘干净，装配器（`src/near-field.js`）一个口令喊三声，引擎的 `dispose` 只喊装配器与接地带。注入这一条抓出 **24 样没还**。
 - **灯火与光晕那两份材质**。四个桶共用同一份材质，所以 `buildings.dispose()` 的名单里没有它们（它只还自己 `materials` 那一批），造它们的是 `scene.js`——还也由 `scene.js` 喊。注入抓出 2 样。
@@ -827,7 +893,7 @@ Node 新增 19 项（`tests/engine.test.js`，不开浏览器）：投影与 `pl
 
 **注入三处，三处都咬到。** ① 把 `setFacade` 里的 `wanted` 恒置 `true` → `白昼有点亮的灯火层：[4, 4]`；② 把逐楼格号写死成 `{col: 0, row: 0}` → `public 的楼少了格号：["0,1", "2,1", "3,2", …]`（缺的格直接打出来）；③ 把 `LAMP_OPACITY_STOPS` 整条压成 0（层还在提交、只是全透明）→ `灯火最亮的那处只把像素推动 182，不像加色层`。③ 值得记：它没有把 `movedShare` 打下去，因为光晕那一层还活着——**"整幅变了多少"证明不了某一层在画，峰值才证明**，所以两条判据都得留。
 
-**还欠的，以及一条不能再往前用的判据。** ①**换窗交叉淡（第 2 组 `set` 与"城市呼吸"）当时没进图集**：`lampAtlasImage` 只画 `set 0`，现版那侧的两组轮换与零星明灭在引擎里没有承载——这一格已在 2026-10-07 接上（图集 9 列变 18 列、新增逐顶点 `aLampBits`），见第 13 节。②新引擎夜景仍缺塔身壳体发光与江面波光（车流与行人在同一批接上了），所以**"整幅画面与现版逐字节／按亮度分布比对"这一类闸门在新引擎夜景上还不成立**：同一机位实测新引擎夜景中位 27／p99 131.7／>120 的像素 4,032 个，现版 34.5／222.6／46,808 个（`node scripts/probe-night-abs.mjs` 出这两个读数）——差的是那些要素，不是这两层，拿它当判据会把"补了窗灯"判成"退步"。这一轮因此全部走**开关同一层的自差**（关掉它少了什么，`probe-night-cells.mjs` 量门控与逐楼格号、`probe-night-delta.mjs` 量整幅差与落到墙上的证据）而不是两引擎互差。③墙面自身光照那一档色差仍在（上一节记的，属 Phase 2 光照那一半）。
+**还欠的，以及一条不能再往前用的判据。** ①**换窗交叉淡（第 2 组 `set` 与"城市呼吸"）当时没进图集**：`lampAtlasImage` 只画 `set 0`，现版那侧的两组轮换与零星明灭在引擎里没有承载——这一格已在 2026-10-07 接上（图集 9 列变 18 列、新增逐顶点 `aLampBits`），见第 13 节。②新引擎夜景仍缺塔身壳体发光与江面波光（车流与行人在同一批接上了；**江面波光那一格已在 2026-10-14 接上，见「江面那层波光进新引擎」那一节，壳体仍欠＝#190**），所以**"整幅画面与现版逐字节／按亮度分布比对"这一类闸门在新引擎夜景上还不成立**：同一机位实测新引擎夜景中位 27／p99 131.7／>120 的像素 4,032 个，现版 34.5／222.6／46,808 个（`node scripts/probe-night-abs.mjs` 出这两个读数）——差的是那些要素，不是这两层，拿它当判据会把"补了窗灯"判成"退步"。这一轮因此全部走**开关同一层的自差**（关掉它少了什么，`probe-night-cells.mjs` 量门控与逐楼格号、`probe-night-delta.mjs` 量整幅差与落到墙上的证据）而不是两引擎互差。③墙面自身光照那一档色差仍在（上一节记的，属 Phase 2 光照那一半）。
 
 成图（`node scripts/shot-engine-lamp.mjs`）：[夜景整幅 新引擎](docs/screenshots/engine-lamp-full-night-three.png) 对 [夜景整幅 现版](docs/screenshots/engine-lamp-full-night-maplibre.png)、[夜景细部 新引擎](docs/screenshots/engine-lamp-close-night-three.png) 对 [夜景细部 现版](docs/screenshots/engine-lamp-close-night-maplibre.png)。**两对都不是对照物**：地址里同一格机位，现版还带着"让位给面板"的 padding（顶 200／左 280），所以细部框里一边是塔、一边是塔南那排楼；现版那侧另有车流与壳体发光。这两张的用途是"窗与晕进了画面之后读起来像不像一座夜里的城"。
 
@@ -869,7 +935,7 @@ Node 新增 19 项（`tests/engine.test.js`，不开浏览器）：投影与 `pl
 
 **③ 一条踩死的硬限制：three.js 的程序缓存键不看着色器源码。** 亮窗与光晕两张材质的参数**一模一样**（同一份图集配置、同一种加色混合、同样不写深度），只有 `onBeforeCompile` 塞进去的那段片元不同——而 three 拼缓存键只看参数，于是第二个材质直接复用第一个编译好的程序。症状是最难认的那种：**把列偏移从 9 改成 4.5，画面零变化**（不是变暗、不是变花，是一颗像素都不动），交叉淡的第二手压根没上屏。补一句 `material.customProgramCacheKey = () => 'lamp-' + mode`，同一处改动在同一机位动了 **4,175 颗**像素。这条也解释了一次假绿：这一项最早的判据把"一次交叉淡改了多少像素"钉在 `> 800`，而"两手册同一列"那个缺陷实测是 **1,077**——门槛比缺陷值还低，注入照样绿。把三条判据的刻度一次量齐（出厂 2,563／265／163，三种注入分别 1,077／258／128、1,712／**79**／20、7,901／326／**809**），门槛才敢写成现在的 1,500（`moved`）、144（成簇度，沿用现版那把尺）、400（小窗数，新加的"不许全城同闪"上限）。
 
-**④ 剩下两格不是动效，是资产。** 壳体发光与江面波光在引擎里没有承载物：现版那侧的塔身、壳体、落水色带是**另一套 `THREE.Scene` + 共用 MapLibre 画布的 renderer**（`src/tower.js:447`、`487`），皇冠呼吸与壳体发光都挂在那上面；引擎里的江是 `ground-water` 那一块单色板，而现版的滚动是往瓦片里逐行搬像素（`src/water.js` 的 `scrollWater`）。所以这两格要做的是"把地标与水面迁进引擎场景"，动效只是迁完之后顺着同一拍接上的那一半——已单独立项（#170），随 V8 Phase 3，不在本轮硬做。**这一条不改判据也不放宽闸门**：新引擎夜景仍不许拿"与现版整幅逐字节／按亮度分布互差"当判据，理由和第 10 节写的一样。
+**④ 剩下两格不是动效，是资产。** 壳体发光与江面波光在引擎里没有承载物：现版那侧的塔身、壳体、落水色带是**另一套 `THREE.Scene` + 共用 MapLibre 画布的 renderer**（`src/tower.js:447`、`487`），皇冠呼吸与壳体发光都挂在那上面；引擎里的江是 `ground-water` 那一块单色板，而现版的滚动是往瓦片里逐行搬像素（`src/water.js` 的 `scrollWater`）。所以这两格要做的是"把地标与水面迁进引擎场景"，动效只是迁完之后顺着同一拍接上的那一半——已单独立项（#170），随 V8 Phase 3，不在本轮硬做。**这一条不改判据也不放宽闸门**：新引擎夜景仍不许拿"与现版整幅逐字节／按亮度分布互差"当判据，理由和第 10 节写的一样。（**2026-10-14 的账面**：这两格里江面波光那一格已做完（#189，见「江面那层波光进新引擎」那一节），壳体那一格转 #190。）
 
 **⑤ 账目与界面**：draw call 白昼 **17** 发（8 块地面 + 4 墙 + 4 窗格 + 车体一发）、夜景 **28** 发——八层灯火各一发，车流在夜景再多三发（远景光点一发，灯珠 quad **两发**，因为它是双面透明材质，three 正反面各画一遍）。灯火那条判据因此先把车流那一组藏起来量，"八层各一发"这句话才只说灯火。能答话的控件从 3 个变成 4 个：三个氛围按钮之外，动效开关在引擎这一侧也点亮了（它现在真的有东西可开关）。
 

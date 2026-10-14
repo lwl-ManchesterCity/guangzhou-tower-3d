@@ -16,6 +16,7 @@ import {
   lampOpacityFor, setLampWeights,
 } from './facades.js';
 import { createProjection } from './projection.js';
+import { createRiverSheen } from './river.js';
 import { LAMP_PERIODS_MS, lampWeight } from '../facade.js';
 import { createBloom } from './bloom.js';
 
@@ -150,6 +151,9 @@ export function createEngineScene(options) {
   const surfaces = [...(data.water ?? []), ...(data.greens ?? []), ...(data.blocks ?? []), ...(data.grounds ?? [])];
   const ground = createGround({ project, radius: SCENE.radius, colors: groundColors(ATMOSPHERES[atmosphereId] ?? ATMOSPHERES.day),
     streets: data.streets ?? [], surfaces });
+  // 江面那层波光：与现版同一个形状——水面是一层平色，波光压在它上面、只带 alpha。像素出自 `src/water.js` 那三张图，
+  // 挑面的名单也出自同一张 `toneOf` 表，所以"画了水色的那些面"与"起波光的这些面"必然是同一批。
+  const river = createRiverSheen({ project, surfaces, atmosphere: atmosphereId });
   // 默认画全量：3,990 面按类别并成几桶。`testBuildings` 留着一个调试阀门——要只看最高的 N 栋时传个数进来，
   // 现版那套"取真实最高的 10 栋、按高度再按 id 排序"的确定性还在 `pickTallest` 里。
   const features = testBuildings ? pickTallest(data.buildings ?? [], testBuildings) : (data.buildings ?? []);
@@ -175,16 +179,23 @@ export function createEngineScene(options) {
   // 楼根那一圈接地带与近场同一份模块、同一条镜头门控（现版那侧在 `tower.js` 的 render 里读同一个数）。
   const bases = options.bases ?? null;
   if (bases) scene.add(bases.group);
-  scene.add(ground.group, buildings.group);
+  scene.add(ground.group, river.group, buildings.group);
 
   // 现版那个循环写的是样式与 global state，这里写的是一格图集里的两个采样权重与一批实例矩阵。
   // 两组的周期与 `lampWeight` 都从 `src/facade.js` 取，所以同一时刻两边给同一组楼的是同一个数。
-  const motion = { on: false, previous: undefined, carry: 0, life: 0, lamp: 0, lights: 0, lampTicks: 0 };
+  const motion = { on: false, previous: undefined, carry: 0, life: 0, lamp: 0, lights: 0, lampTicks: 0, riverSteps: 0 };
   const lampMaterials = [lampMaterial, glowMaterial];
   const lampWeights = () => LAMP_PERIODS_MS.map((period) => lampWeight((motion.lamp / period) % 1));
   function stepMotion(elapsed, view) {
     motion.life += elapsed;
     nearField?.advance(motion.life / 1000, view.zoom);
+    // 江面每一拍滚一整行（一个 CSS 像素），与现版那句 `scrollRiver(steps)` 同一个步长；滚的是偏移量而不是像素，
+    // 所以这一格不像现版那样每拍重传一张图，但绕回一行的环是同一个（`river.js` 里那句取模与它逐字对应）。
+    const riverSteps = Math.round(elapsed / MOTION_STEP_MS);
+    if (riverSteps > 0) {
+      river.advance(riverSteps);
+      motion.riverSteps += riverSteps;
+    }
     motion.lights++;
     // 灯窗那一拍只在夜景推进，与现版 `map.js` 里 `atmosphereId === 'night'` 那道闸门同一条。白天那八层本来就不画，
     // 让权重跟着走有两处不对：读数轨上两引擎同一秒报的不是同一批数（现版 `lampTicks` 在白天是 0），
@@ -200,6 +211,7 @@ export function createEngineScene(options) {
     motion.life = 0;
     motion.lamp = 0;
     nearField?.advance(0, zoom);
+    river.reset();
     setLampWeights(lampMaterials, 1, 1);
   }
 
@@ -255,10 +267,14 @@ export function createEngineScene(options) {
   panel.setAttribute('aria-live', 'off');
   container.append(panel);
 
-  function motionAvailable() { return Boolean(nearField?.groups.length) || atmosphereId === 'night'; }
+  function motionAvailable() { return Boolean(nearField?.groups.length) || Boolean(river.mesh) || atmosphereId === 'night'; }
   function motionStatus() {
+    const sheen = river.report();
     return { on: motion.on, available: motionAvailable(), stepMs: MOTION_STEP_MS, lampMs: LAMP_PERIODS_MS,
-      lights: motion.lights, lampTicks: motion.lampTicks, lamps: lampWeights(), tiles: 0 };
+      lights: motion.lights, lampTicks: motion.lampTicks, lamps: lampWeights(),
+      // 江面那三格与现版同名同义：`phase` 是此刻滚到第几行、`steps` 是这一页一共滚了几行、`tiles` 是有几档贴图
+      // （没有水面的那侧就是 0）。判据因此可以把同一秒的两边并排对。
+      phase: sheen.scroll, steps: motion.riverSteps, tiles: river.mesh ? river.tiles.length : 0 };
   }
   // 与现版同名同形状的读数，判据才能两边并排：车与人的数、场半径、当前画不画行人，以及行人那一档的阈值。
   // 这一份形状定义在 `src/near-field.js`，两边读的是同一个 `readout()`。
@@ -320,6 +336,9 @@ export function createEngineScene(options) {
     }
     // 接地带的门控读的也是这一帧的镜头：与现版那侧同一条理由（载入那帧与跑过又停下那帧必须是一张画）。
     bases?.setZoom(view.zoom);
+    // 波光的透明度读 zoom，格子读转角、设备倍率与画布中心——斜坡那一格内部按 1/20 级归档，镜头停住就不必再写。
+    river.setView({ zoom: view.zoom, bearing: view.bearing, pixelRatio: renderer.getPixelRatio(),
+      width: lastWidth, height: lastHeight, centre: view.center });
     if (motion.on) {
       // 后台标签页停 rAF，回到前台那一帧的差值是整个空档；不夹一下车流会瞬移，与现版那条江面同一个理由。
       const delta = motion.previous === undefined ? 0 : Math.min(time - motion.previous, 4 * MOTION_STEP_MS);
@@ -345,7 +364,7 @@ export function createEngineScene(options) {
       const features = ground.report.features;
       const greens = (features.park ?? 0) + (features.grass ?? 0) + (features.wood ?? 0);
       panel.textContent = `V8 Phase 2 · three ${samples.fps} fps · 最长帧 ${samples.ms} ms · ${buildings.count} 栋 / 窗纹 ${buildings.grids} 层 / `
-        + `灯火 ${buildings.lamps + buildings.glows} 层 / 江上 ${nearField?.counts.boats ?? 0} 船 / 地面 ${ground.group.children.length} 块：`
+        + `灯火 ${buildings.lamps + buildings.glows} 层 / 波光 ${river.mesh ? 1 : 0} 层 / 江上 ${nearField?.counts.boats ?? 0} 船 / 地面 ${ground.group.children.length} 块：`
         + `水 ${features.water ?? 0}·绿 ${greens}·地块 ${features.block ?? 0}·铺装 ${features.pavement ?? 0}·路 ${features.road ?? 0}`;
     }
     // The hash is the shared language between the two engines, but writing it on every frame would push a new entry
@@ -391,7 +410,9 @@ export function createEngineScene(options) {
     counts: () => ({ buildings: buildings.count, ground: ground.group.children.length, facades: buildings.grids,
       lamps: buildings.lamps, glows: buildings.glows, drawCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
       // 泛光那一格并进读数：判据要能分清"这一帧多了几发"是灯火层多的还是后处理链多的。
-      bloom: bloom ? { ...bloom.report(), built: true } : { share: bloomShare, built: false } }),
+      bloom: bloom ? { ...bloom.report(), built: true } : { share: bloomShare, built: false },
+      // 江面波光那一层单独报一发数：它是新增的写入者，发数账与像素判据都要能把它摘出去。
+      river: river.report() }),
     /**
      * 泛光的阀门：给一个数是档位（0~1，夜景给满），给一个对象是逐格改那三个数（`{strength, radius, threshold}`）。
      * 取证脚本扫参数靠后一种；判据读 `counts().bloom` 那一格看它落在哪一档。
@@ -406,6 +427,8 @@ export function createEngineScene(options) {
       nearField?.setLit(atmosphereId === 'night');
       // 泛光跟着夜景同一把开关：白昼与日落没有该晕的发光体，那一档连那条链都不走。
       setBloomShare(atmosphereId === 'night' ? 1 : 0);
+      // 江面那三档贴图与现版同一份，换氛围就是换采样那一张图并把格子放回出厂那一行。
+      river.setAtmosphere(atmosphereId);
       return atmosphereId;
     },
     /** 动效总开关。关掉 = 现版那侧的"全部停下"：车流与交叉淡都回到出厂那一格。 */
@@ -445,6 +468,7 @@ export function createEngineScene(options) {
       // 以前这里只收了自己那五块，换一次场景就把车、人、船、湿线与灯的三层留在显存里（#177）。
       nearField?.dispose();
       bases?.dispose?.();
+      river.dispose();
       bloom?.dispose();
       panel.remove();
       renderer.dispose();
