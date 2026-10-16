@@ -8,6 +8,9 @@ import { createProjection, groundRing } from '../src/engine/projection.js';
 import { distanceForZoom, eyeFromView, viewFromEye, wrapBearing, zoomForDistance, cameraToCentre, flightStep } from '../src/engine/camera.js';
 import { FOG_RATIOS } from '../src/engine/scene.js';
 import { GROUND_LAYERS, ROAD_WIDTH_METRES, TONE_OF_KIND, createGround, plateGeometry, polygonsOf, ribbonGeometry, roadWidth, toneOf } from '../src/engine/ground.js';
+import { PLAZA_LAYERS, createPlazaGround, plazaColors } from '../src/engine/plaza.js';
+import { PLAZA_SURFACE_MIN_ZOOM } from '../src/plaza-surface.js';
+import { ATMOSPHERES } from '../src/atmosphere.js';
 import { DEFAULT_HEIGHT, buildingGeometry, createBuildingBuckets, drawnHeight, mergeSolids, pickTallest } from '../src/engine/buildings.js';
 import {
   FACADE_CATEGORY_SHAPES, LAMP_DARK_RESIDUE, LAMP_GROUPS, LIGHT_BANDS, LIGHT_FADES, LIGHT_TEMPERATURES, LIGHT_TILE, glowTexture,
@@ -655,4 +658,112 @@ test('1015 面全都能三角化成几何，一个都不静默丢', async () => 
   }
   assert.equal(ground.group.children.length, 1 + Object.keys(ground.report.tones).length, '一块音一档网格，基底之外');
   ground.dispose();
+});
+
+// ———— 花城广场那层米数地面进新引擎（#192）————
+// 现版那侧它是四张 `fill` 层加一张乘性网格；这一侧的"底图"是 `ground.js` 那几块平色板，
+// 所以这一组判据钉的是"对应物造齐了没有、站的位置对不对、门控与换氛围有没有人喊"。
+const plazaInput = async () => {
+  const [water, greens, blocks, streets] = await Promise.all(
+    ['canton-water', 'canton-greens', 'canton-blocks', 'canton-streets'].map(surfaceOf));
+  return { water: water.features, greens: greens.features, blocks: blocks.features, streets: streets.features };
+};
+const buildPlaza = async (preset = ATMOSPHERES.day, extra = {}) => createPlazaGround({
+  ...(await plazaInput()), project, origin, preset, ...extra });
+const decalOf = (plaza) => plaza.group.children.find((mesh) => mesh.name === 'canton-plaza-surface');
+
+test('广场那一层站在引擎那几块平色板与路带之上，标高仍然在半米以内', async () => {
+  const values = Object.values(PLAZA_LAYERS);
+  assert.deepEqual(values, [...values].sort((a, b) => a - b), '层序就是画序，这一叠必须一路往上走');
+  assert.ok(values.every((value) => value > GROUND_LAYERS.road),
+    '广场的板落回路带底下了：`canton-blocks` 那些行人面在 `ground.js` 判成 0.06 m 的 `pavement`，会被 0.13 m 的公园面整片盖掉');
+  assert.ok(Math.max(...values) <= 0.5, '这一叠也要留在相机保得住的景深精度以内');
+  assert.deepEqual(Object.keys(PLAZA_LAYERS), ['lawn', 'stone', 'walk', 'surface'], '网格必须站在它乘的那几块板之上');
+});
+
+test('四类面按出厂快照切出来，池面用引擎已有的那层水色', async () => {
+  const plaza = await buildPlaza();
+  assert.deepEqual(plaza.report().classes, { lawn: 20, pool: 1, stone: 4, walk: 17, missing: false });
+  assert.deepEqual(plaza.group.children.map((mesh) => mesh.name),
+    ['plaza-lawn', 'plaza-stone', 'plaza-walk', 'canton-plaza-surface']);
+  // 每类喂进去几块面，那块板就至少得有几个三角：一块面静默丢掉是这三族的旧账（`toneOf` 那一条钉的是同一件事）。
+  const faces = { 'plaza-lawn': 20, 'plaza-stone': 4, 'plaza-walk': 17 };
+  for (const mesh of plaza.group.children.slice(0, 3)) {
+    const triangles = mesh.geometry.getAttribute('position').count / 3;
+    assert.ok(triangles >= faces[mesh.name], `${mesh.name} 只三角化成 ${triangles.toFixed(0)} 个三角，喂进去 ${faces[mesh.name]} 块面`);
+    assert.equal(mesh.material.isMeshBasicMaterial, true, `${mesh.name} 在吃场景的灯：平色板是不受光的那一族`);
+  }
+  // 池面没有第四块板，但贴图里那一格必须还在——它乘的是 `ground.js` 画出来的那块水色。
+  assert.ok(plaza.report().counts.pool > 0, `贴图里的池面 ${plaza.report().counts.pool} 格，那块水面没进广场`);
+});
+
+test('那张乘性网格只在细节落得下像素的那些层级上，读的是一帧里的镜头', async () => {
+  const plaza = await buildPlaza();
+  const decal = decalOf(plaza);
+  assert.equal(PLAZA_SURFACE_MIN_ZOOM, 16.5, '这一档一动，逐字节回帧那几条判据的机位要重新核对');
+  for (const [zoom, expected] of [[15.5, false], [16.49, false], [16.5, true], [18, true]]) {
+    plaza.setZoom(zoom);
+    assert.equal(decal.visible, expected, `${zoom} 级上报的是 ${decal.visible}`);
+  }
+  assert.equal(decal.material.blending, THREE.MultiplyBlending, '这块东西不是乘上去的，缝与收边就只是涂掉底色');
+  assert.equal(decal.material.premultipliedAlpha, true, 'three 要求 MultiplyBlending 配预乘 alpha，否则它报错并把这块画错');
+  assert.equal(decal.material.depthWrite, false, '它站在地面上，但不该遮挡树、车和人');
+  assert.equal(decal.material.transparent, true);
+  assert.equal(decal.renderOrder, -1);
+  // 贴图是乘数不是颜色：它必须不带色彩管理，否则 0.9 那一档会被 sRGB 解码成另一个数。
+  assert.equal(decal.material.map.colorSpace, THREE.NoColorSpace);
+});
+
+test('换氛围刷的是那三块板自己的档位，贴图不参与换色', async () => {
+  const plaza = await buildPlaza();
+  const plates = plaza.group.children.slice(0, 3);
+  const texture = decalOf(plaza).material.map;
+  const colourOf = (mesh) => `#${mesh.material.color.getHexString()}`;
+  const day = plazaColors(ATMOSPHERES.day);
+  assert.deepEqual(plates.map((mesh) => [mesh.name, colourOf(mesh)]),
+    [['plaza-lawn', day['plaza-lawn']], ['plaza-stone', day['plaza-stone']], ['plaza-walk', day['plaza-walk']]]);
+  plaza.setAtmosphere(ATMOSPHERES.night);
+  const night = plazaColors(ATMOSPHERES.night);
+  assert.deepEqual(plates.map((mesh) => [mesh.name, colourOf(mesh)]),
+    [['plaza-lawn', night['plaza-lawn']], ['plaza-stone', night['plaza-stone']], ['plaza-walk', night['plaza-walk']]]);
+  assert.notEqual(colourOf(plates[0]), day['plaza-lawn'], '换了一次氛围，草坪那一块的颜色一格没动');
+  assert.equal(decalOf(plaza).material.map, texture, '换氛围把乘数那张图也换了：它只压暗，不认色温');
+});
+
+test('拆掉广场这一层时，三块板、那张网格与背后那张贴图各自都还了', async () => {
+  const plaza = await buildPlaza();
+  const seen = [];
+  const tracker = [];
+  const mark = (item, name) => {
+    if (!item) { tracker.push(`缺 ${name}`); return; }
+    if (seen.includes(item)) return;
+    seen.push(item);
+    item.addEventListener('dispose', () => item.__disposed = true);
+    tracker.push([name, item]);
+  };
+  for (const mesh of plaza.group.children) { mark(mesh.geometry, `geometry:${mesh.name}`); mark(mesh.material, `material:${mesh.name}`); }
+  mark(decalOf(plaza).material.map, 'texture:canton-plaza-surface');
+  plaza.dispose();
+  assert.deepEqual(tracker.filter((row) => typeof row === 'string'), [], `这一层没能挂上监听：${tracker.filter((row) => typeof row === 'string')}`);
+  assert.deepEqual(tracker.filter(([name, item]) => !item.__disposed).map(([name]) => name), [], 'dispose 之后这些资源没还');
+  assert.equal(plaza.group.children.length, 0, '还了资源但节点还挂在组里');
+});
+
+test('快照里没有那块公园面，这一层整个不存在', async () => {
+  const input = await plazaInput();
+  assert.equal(createPlazaGround({ ...input, greens: input.blocks, project, origin, preset: ATMOSPHERES.day }), null,
+    '绿地里没有花城广场那一格，就该报 null 而不是造一层空壳');
+  const plaza = await buildPlaza();
+  assert.ok(plaza.group.children.length > 0);
+});
+
+test('引擎那一侧真的喊了广场这一层的四件事', async () => {
+  const source = await readFile(new URL('../src/engine/scene.js', import.meta.url), 'utf8');
+  for (const [label, needle] of [
+    ['挂进场景', 'if (plaza) scene.add(plaza.group);'],
+    ['每帧交镜头', 'plaza?.setZoom(view.zoom);'],
+    ['换氛围刷色', 'plaza?.setAtmosphere(preset);'],
+    ['拆场景还资源', 'plaza?.dispose();'],
+    ['读数面板点名', 'plaza?.report().plates'],
+  ]) assert.ok(source.includes(needle), `scene.js 里没有${label}那一句（${needle}）`);
 });

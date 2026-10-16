@@ -6,9 +6,11 @@ import * as THREE from 'three';
 import { ATMOSPHERES } from '../atmosphere.js';
 import { DEFAULT_CENTER, SCENE, VIEW_LIMITS } from '../config.js';
 import { formatView, parseView } from '../link.js';
+import { viewportPadding } from '../padding.js';
 import { LANDMARKS } from '../landmarks.js';
 import { createRig } from './camera.js';
 import { createGround } from './ground.js';
+import { createPlazaGround } from './plaza.js';
 import { createBuildingBuckets, drawnHeight, pickTallest } from './buildings.js';
 import {
   createFacadeSet, createLampMaterial, facadeOpacityFor, glowAtlasTexture, glowOpacityFor, lampAtlasTexture, lampCellOf,
@@ -154,6 +156,11 @@ export function createEngineScene(options) {
   // 江面那层波光：与现版同一个形状——水面是一层平色，波光压在它上面、只带 alpha。像素出自 `src/water.js` 那三张图，
   // 挑面的名单也出自同一张 `toneOf` 表，所以"画了水色的那些面"与"起波光的这些面"必然是同一批。
   const river = createRiverSheen({ project, surfaces, atmosphere: atmosphereId });
+  // 花城广场那四类实测面与地面那张按广场米数铺开的乘性贴图（#192）。现版那侧它是四张 `fill` 层加一块贴在塔那一层
+  // 地面通道上的网格，这一侧的"底图"就是上面那几块平色板，所以补的是同一件事的对应物：三块板 + 一张乘性网格。
+  // 快照里没有那块公园面（`carvePlaza` 报 `missing`）就整层不存在，不造空壳。
+  const plaza = createPlazaGround({ greens: data.greens ?? [], water: data.water ?? [], blocks: data.blocks ?? [],
+    streets: data.streets ?? [], project, origin: SCENE.center ?? DEFAULT_CENTER, preset: ATMOSPHERES[atmosphereId] ?? ATMOSPHERES.day });
   // 默认画全量：3,990 面按类别并成几桶。`testBuildings` 留着一个调试阀门——要只看最高的 N 栋时传个数进来，
   // 现版那套"取真实最高的 10 栋、按高度再按 id 排序"的确定性还在 `pickTallest` 里。
   // 有壳体站在那几块地上之后，盒子必须先让位：现版那侧是样式里的 `formFilter`（`['!', ['in', osmId, …]]`），
@@ -191,6 +198,7 @@ export function createEngineScene(options) {
   const bases = options.bases ?? null;
   if (bases) scene.add(bases.group);
   scene.add(ground.group, river.group, buildings.group);
+  if (plaza) scene.add(plaza.group);
   if (landmarks) scene.add(landmarks.group);
 
   // 现版那个循环写的是样式与 global state，这里写的是一格图集里的两个采样权重与一批实例矩阵。
@@ -259,6 +267,9 @@ export function createEngineScene(options) {
       const color = colors[mesh.name.replace('ground-', '')];
       if (color) mesh.material.color.set(color);
     }
+    // 广场那三块板不吃上面那张表：它们刷的是 `plaza.js` 那四层自己的档位（草坪用水边草色、石材用广场色、
+    // 步行带用广场步道色），与现版那四张 `fill` 层的 paint 是同一份对应物。
+    plaza?.setAtmosphere(preset);
   };
 
   applyPreset(ATMOSPHERES[atmosphereId] ?? ATMOSPHERES.day);
@@ -271,6 +282,9 @@ export function createEngineScene(options) {
     canvas,
     project,
     limits,
+    // 取景留白与现版同一张表（`src/padding.js`）。这一侧的街区清单还是灰的（`main.js` 那句边界说明），
+    // 所以 `panelOpen` 恒为 false；同一串 hash 因此在两边落在同一格画面上（#191，改之前差 140×70 px）。
+    padding: () => viewportPadding(false),
     initial: stored ?? heroView,
   });
 
@@ -358,6 +372,8 @@ export function createEngineScene(options) {
     }
     // 接地带的门控读的也是这一帧的镜头：与现版那侧同一条理由（载入那帧与跑过又停下那帧必须是一张画）。
     bases?.setZoom(view.zoom);
+    // 广场那张乘性贴图读的也是这一帧：它与接地带同一条理由——载入那帧与跑过又停下那帧必须给同一个答案。
+    plaza?.setZoom(view.zoom);
     // 波光的透明度读 zoom，格子读转角、设备倍率与画布中心——斜坡那一格内部按 1/20 级归档，镜头停住就不必再写。
     river.setView({ zoom: view.zoom, bearing: view.bearing, pixelRatio: renderer.getPixelRatio(),
       width: lastWidth, height: lastHeight, centre: view.center });
@@ -389,7 +405,7 @@ export function createEngineScene(options) {
       const features = ground.report.features;
       const greens = (features.park ?? 0) + (features.grass ?? 0) + (features.wood ?? 0);
       panel.textContent = `V8 Phase 2 · three ${samples.fps} fps · 最长帧 ${samples.ms} ms · ${buildings.count} 栋 / 窗纹 ${buildings.grids} 层 / `
-        + `灯火 ${buildings.lamps + buildings.glows} 层 / 波光 ${river.mesh ? 1 : 0} 层 / 壳体 ${landmarks?.report().shells ?? 0} 片 / 江上 ${nearField?.counts.boats ?? 0} 船 / 地面 ${ground.group.children.length} 块：`
+        + `灯火 ${buildings.lamps + buildings.glows} 层 / 波光 ${river.mesh ? 1 : 0} 层 / 壳体 ${landmarks?.report().shells ?? 0} 片 / 广场 ${plaza?.report().plates ?? 0} 层 / 江上 ${nearField?.counts.boats ?? 0} 船 / 地面 ${ground.group.children.length} 块：`
         + `水 ${features.water ?? 0}·绿 ${greens}·地块 ${features.block ?? 0}·铺装 ${features.pavement ?? 0}·路 ${features.road ?? 0}`;
     }
     // The hash is the shared language between the two engines, but writing it on every frame would push a new entry
@@ -430,7 +446,9 @@ export function createEngineScene(options) {
       // 江面波光那一层单独报一发数：它是新增的写入者，发数账与像素判据都要能把它摘出去。
       river: river.report(),
       // 地标这一层同理：壳体名单、几片壳、三条落水带在不在、夜景权重走到哪——"关掉这一层少了什么"要能报得出来。
-      landmarks: landmarks ? landmarks.report() : null }),
+      landmarks: landmarks ? landmarks.report() : null,
+      // 广场这一层报的是四类面各切出几块、贴图画了多少格缝/收边/水线，以及那块乘性网格此刻在不在。
+      plaza: plaza ? plaza.report() : null }),
     /**
      * 泛光的阀门：给一个数是档位（0~1，夜景给满），给一个对象是逐格改那三个数（`{strength, radius, threshold}`）。
      * 取证脚本扫参数靠后一种；判据读 `counts().bloom` 那一格看它落在哪一档。
@@ -489,6 +507,9 @@ export function createEngineScene(options) {
       nearField?.dispose();
       bases?.dispose?.();
       river.dispose();
+      // 广场那三块板、那张乘性网格与它背后那张贴图都是这一层造的（`engine/plaza.js`），所以也这一层还——
+      // 与 `river` 那一层同一个口径：谁造的谁还。
+      plaza?.dispose();
       // 地标这一层的几何、材质与贴图都在它自己手里（立面图集、灯图、塔网格那道高度斜坡的贴图），还由这一层喊。
       landmarks?.dispose();
       bloom?.dispose();

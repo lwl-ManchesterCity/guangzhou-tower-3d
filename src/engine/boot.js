@@ -4,7 +4,7 @@ import { DEFAULT_CENTER, SCENE } from '../config.js';
 import { createEngineScene } from './scene.js';
 import { attachRotate } from './gestures.js';
 import { trafficSprite } from '../traffic-life.js';
-import { createNearField } from '../near-field.js';
+import { createNearField, engineDecks } from '../near-field.js';
 import { createBaseBands } from '../shadow-pads.js';
 
 // Which local snapshot feeds each layer. `canton-river.geojson`（那条按实测河宽描出的示意江带）从这里
@@ -27,16 +27,17 @@ export async function bootThreeEngine({ container, base = '/data/', onError, ...
   // 近场三组（项 5 与江上的船）。算法、路网、米制原点与现版是同一份，所以这里不写第二套"车怎么摆"，也不写
   // 第二套开关：装配交给 `src/near-field.js`，谁在动由引擎这一侧的 120 ms 一拍说了算。
   // 车的高度还有一项来自桥：`crossings` 里那些 `part === 'deck'` 的件就是现版那两层挤出体的顶。
-  // 引擎这一侧现在只画海心桥那一条桥面（壳体那一格，#190），其余跨江桥面还是平色路带——
-  // 而这条规则是"同名继承"，把整份 `deckHeights` 传进来会让车站到一条没画的桥上去。
-  // 所以 `decks` 仍然不传，等其余桥面进引擎那天一起接（#192）。
+  // 引擎这一侧只把海心桥画成了体（壳体那一格，#190），其余跨江桥面还是平色路带，所以这张表由 `engineDecks()`
+  // 从"这一侧真画了哪几座桥面"里派生：它现在只有一条，顶高读的是壳体自己那两格 `base + thickness`。
+  // 传整份快照表会让车站到一条没画出来的桥上——同名继承那条规则认的是桥名，不是这一侧画没画。
   const streets = (entries.find(([key]) => key === 'streets') ?? [])[1] ?? [];
   const river = (entries.find(([key]) => key === 'river') ?? [])[1] ?? [];
+  const bridge = (entries.find(([key]) => key === 'bridge') ?? [])[1] ?? [];
   // 岸线用同一批 `water` 面，所以船的横向游移在窄的那条汊里会被夹回到水里。
   const shore = (entries.find(([key]) => key === 'water') ?? [])[1] ?? [];
   // 那颗光晕贴图由这里造、也由这里还：`traffic-life.js` 的 dispose 只管自己那批几何与材质，共用贴图归建它的那一方。
   const sprite = trafficSprite();
-  const nearField = createNearField({ streets, river, shore, origin: SCENE.center ?? DEFAULT_CENTER, sprite });
+  const nearField = createNearField({ streets, river, shore, origin: SCENE.center ?? DEFAULT_CENTER, sprite, decks: engineDecks(bridge) });
   // 楼根那一圈接地带：与现版共用 `src/shadow-pads.js`，所以两边的画面在这一格上是同一片影、同一个门控。
   const bases = createBaseBands({ features: (entries.find(([key]) => key === 'buildings') ?? [])[1] ?? [], origin: SCENE.center ?? DEFAULT_CENTER });
   const engine = createEngineScene({ container, data: Object.fromEntries(entries), nearField, bases, ...rest });

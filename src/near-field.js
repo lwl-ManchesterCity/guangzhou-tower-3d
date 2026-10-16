@@ -3,12 +3,28 @@
 // 为什么现在收：这两条渲染路径此前各接了一遍同样的五件事。2026-10-09 加江上的船时最能看出来——`map.js`+`tower.js`
 // 与 `boot.js`+`scene.js` 各挂一次组、各推进一次、各藏一次发数账，连 `nearTraffic()` 的读数都是两份逐字相同的代码。
 // 收完之后调用方只剩一件各自的事：**这一场的近场是哪几份快照喂出来的**。两处确实不一样，所以留在参数上：
-// 现版那侧桥体已被 `src/bridges.js` 挤成实体，车要站到桥面顶上（`decks`）；新引擎还没有桥体（#170），
-// 抬起来只会让车浮在自己那条平色路带上面，所以故意不传。那颗光晕贴图要 DOM，也由调用方造好递进来。
-import { TRAFFIC_LIFE_RADIUS, WALKER_MIN_ZOOM, createTrafficLife } from './traffic-life.js';
+// 现版那侧桥体已被 `src/bridges.js` 挤成实体，车要站到桥面顶上（`decks`）；新引擎这一侧只把海心桥画成了体
+// （壳体那一格，#190），所以它传的是 `engineDecks()` 那份只有一条的表——其余跨江桥在这一侧还是平色路带，
+// 把整份桥面表搬过来只会让车站到自己没画出来的桥面上去。那颗光晕贴图要 DOM，也由调用方造好递进来。
+import { TRAFFIC_LIFE_RADIUS, WALKER_MIN_ZOOM, createTrafficLife, deckHeights } from './traffic-life.js';
 import { BOAT_LIFE_RADIUS, createWaterLife } from './waterlife.js';
 import { createShoreBand } from './shadow-pads.js';
 import { deriveJunctions } from './junctions.js';
+import { LANDMARK_FORMS } from './landmark-forms.js';
+
+/**
+ * 引擎那一侧的桥面表：只有 `LANDMARK_FORMS` 里 `kind === 'deck'` 的那几座在这一侧真的被画成了体，
+ * 顶高用它自己的 `base + thickness`（也就是 `DECK_TOP_METRES`），写成 `deckHeights` 认的那种件。
+ * 剩下的桥等它们的桥体进引擎那天自己进这张表——这一侧多画一座桥，这里就自动多一条，不需要有人记得来改。
+ *
+ * @param {object[]} features 引擎喂给壳体的那批件（`haixin-bridge.geojson` 之类）
+ */
+export const engineDecks = (features = []) => deckHeights(features
+  .filter((feature) => LANDMARK_FORMS[feature?.properties?.osmId]?.kind === 'deck')
+  .map((feature) => {
+    const form = LANDMARK_FORMS[feature.properties.osmId];
+    return { ...feature, properties: { ...feature.properties, part: 'deck', height: form.base + form.thickness } };
+  }));
 
 /**
  * @param {{streets?: object[], river?: object[], shore?: object[], origin: {lng: number, lat: number},

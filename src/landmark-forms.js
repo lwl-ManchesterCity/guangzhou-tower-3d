@@ -17,6 +17,10 @@ import { facadeAtlas } from './tower-facade.js';
 // named here so the card and the test can both point at them.
 export const DECK_CLEARANCE_METRES = 12;
 export const DECK_THICKNESS_METRES = 3.5;
+// 桥面顶面在哪一米。站着的那一侧（`src/near-field.js` 的 `engineDecks`）要的是"这一侧真画出来的那一层的顶"，
+// 所以它认这一个数，而不是快照里的 `height`——两个数眼下都是 15.5 m，但画的那一侧改了，
+// 站着的那一侧必须跟着改；这条等式由 `tests/near-field.test.js` 拿 `base + thickness` 反照一遍钉住。
+export const DECK_TOP_METRES = DECK_CLEARANCE_METRES + DECK_THICKNESS_METRES;
 
 // A tower that starts at ground with its own shaft looks planted on the city rather than built out of it: what meets
 // the street is a wide low base, and the snapshot's outline is the shaft, not that base. So the podium is drawn - both
@@ -93,9 +97,9 @@ export const LANDMARK_FORMS = {
   },
   // 海心桥: OSM gives the deck as a closed way - a curved strip about 334 m between its abutments, 600 m along its own
   // edge, and 6,800 m² of plan. That outline is what stands here. What OSM does not give is how far the deck stands
-  // off the water or how thick it is, so those two numbers are drawn rather than measured - and the arch the
-  // `bridge:structure=arch` tag promises is not built yet, because its rib needs the deck's centreline, and a strip
-  // whose two edges carry different vertex counts does not give one up by pairing.
+  // off the water or how thick it is, so those two numbers are drawn rather than measured. The arch the
+  // `bridge:structure=arch` tag promises is built from the span line measured *inside* that outline (the longest
+  // interior chord, `crossingChord`), not from a hand-placed axis - see the deck branch in `createLandmarkForms`.
   1313608038: {
     kind: 'deck',
     levels: [[0, 1], [1, 1]],

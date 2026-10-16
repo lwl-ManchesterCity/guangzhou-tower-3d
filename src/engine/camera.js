@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CAMERA_FOV, CAMERA_TILE, EARTH_RADIUS } from '../geo.js';
+import { paddingShift } from '../padding.js';
 import { VIEW_LIMITS } from '../config.js';
 
 const radians = (degrees) => degrees * Math.PI / 180;
@@ -93,15 +94,33 @@ export function flightStep(from, to, amount) {
 }
 
 /**
+ * 把取景留白折进投影：MapLibre 把地理中心放在"抠掉四边留白之后那块窗口的正中"，
+ * 于是整张画面相对画布偏出 ((left − right) / 2, (top − bottom) / 2) 个 CSS 像素。
+ * 这里不动相机、不动 `viewFromEye`（所以深链那套语义一字不改），只加投影矩阵第三列的一点分量：
+ * `x_ndc` 因此整体偏 −Δe[8]、`y_ndc` 整体偏 −Δe[9]，而且**与深度无关**——2026-10-16 在桌面 1440×960、
+ * `#map=15.5/23.1095/113.31913/-25/62` 上量现版那侧的三个地面点（中心、北 300 m、东 300 m），
+ * 三点相对新引擎的差值逐点相同，都是 (−140, −70)，所以两边要补的确实是一张纯平移的画。
+ */
+export function applyPadding(camera, { clientWidth = 1, clientHeight = 1 } = {}, shift = { x: 0, y: 0 }) {
+  const width = clientWidth || 1, height = clientHeight || 1;
+  camera.projectionMatrix.elements[8] += -2 * shift.x / width;
+  camera.projectionMatrix.elements[9] += 2 * shift.y / height;
+  // `zoomToCursor` 与将来的拾取读的是这张矩阵的逆；只改正的不改逆，就是两套一致的投影。
+  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+  return shift;
+}
+
+/**
  * The rig: an OrbitControls input layer over the shipped view semantics.
  *
  * OrbitControls owns the camera position and a ground target; every frame the view state is read back out of it in
  * the hash's own units, and the limits come from `VIEW_LIMITS` rather than the round numbers the brief names, because
  * a camera that cannot reach `#map=10/...` is a link the old engine wrote and the new one silently refuses.
  *
- * @param {{canvas: HTMLCanvasElement, project: Function, initial: object, limits?: object, onChange?: Function}} options
+ * @param {{canvas: HTMLCanvasElement, project: Function, initial: object, limits?: object,
+ *   padding?: Function, onChange?: Function}} options
  */
-export function createRig({ canvas, project, initial, limits = VIEW_LIMITS, onChange }) {
+export function createRig({ canvas, project, initial, limits = VIEW_LIMITS, padding = null, onChange }) {
   const height = () => canvas.clientHeight || 1;
   const camera = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 1, 20000);
   camera.up = new THREE.Vector3(0, 1, 0);
@@ -135,6 +154,7 @@ export function createRig({ canvas, project, initial, limits = VIEW_LIMITS, onCh
     camera.far = eye.distance * 4 + 12000;
     camera.aspect = (canvas.clientWidth || 1) / height();
     camera.updateProjectionMatrix();
+    if (padding) applyPadding(camera, canvas, paddingShift(padding()));
     controls.update();
   };
   const clampZoom = (zoom) => Math.min(limits.maxZoom, Math.max(limits.minZoom, zoom));
@@ -217,6 +237,9 @@ export function createRig({ canvas, project, initial, limits = VIEW_LIMITS, onCh
     resize: (width, pixels) => {
       camera.aspect = width / (pixels || 1);
       camera.updateProjectionMatrix();
+      // 换一次画布尺寸，`updateProjectionMatrix` 会把矩阵重算成没有平移的那一张，所以这里要补回去；
+      // 留白本身也按视口挑档（手机／极矮横屏／桌面），横竖屏来回切不会漏一帧没平移的画。
+      if (padding) applyPadding(camera, { clientWidth: width, clientHeight: pixels }, paddingShift(padding()));
     },
     dispose: () => {
       canvas.removeEventListener('pointerdown', stopFlight);

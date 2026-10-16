@@ -246,9 +246,10 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
   // 只能拿同一镜头下两边的实际盒子比。比的是盒子的**下边中点**：两边的挂法都是 `anchor: bottom` 加 offset [0, -6]，
   // 牌压在它指的那一点上方，于是盒子自身的高度差（现版那块带剪影、拥挤时还会把名字收掉只剩 30 px 宽）不体现在落点上，
   // 而盒子中心会 —— 实测两块的牌高是 23.4 与 24 px，拿中心当落点就先给自己埋下 11.7 px 的假差。
-  // 现版那侧还要先把 `setPadding` 抹平：map.js 按面板位置给了 {top:200,left:280,right:0,bottom:60}，那套排版把投影
-  // 中心从画布中心挪走（实测横向 140 px），而"让位给面板"这件事新引擎要到 Phase 4 才有。抹掉它不是放宽门槛，是把两边
-  // 还没对齐的那一维从对照里拿走；剩下的那一维（同一个点落在哪个像素）两边现在差 0.4 px 以内。
+  // 现版那侧的取景带着 `setPadding`（{top:200,left:280,right:0,bottom:60}），那套排版把投影中心从画布中心挪走 140×70 px。
+  // #191 之前这一侧没有那一维，对照只能先把现版的留白抹掉——那是把没对齐的一维从对照里拿走。现在两边读同一张表
+  // （`src/padding.js`，新引擎侧 `panelOpen` 恒为 false 因为这一侧还没有街区清单面板），所以**带着留白比**：
+  // 这一条量的是"同一串 hash 在两边框出同一张画面"，抹掉留白反而会把 #191 整格判据让掉。
   const anchors = () => [...document.querySelectorAll('.landmark[data-osm-id]')].map((node) => {
     const box = node.getBoundingClientRect();
     return { osmId: Number(node.dataset.osmId), name: node.textContent.trim(),
@@ -259,11 +260,7 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
     const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
     return neighborhood.landmarkLabels();
   });
-  await legacy.evaluate(async () => {
-    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
-    neighborhood.map.setPadding({ top: 0, left: 0, right: 0, bottom: 0 });
-  });
-  // 抹掉 padding 之后 marker 是在渲染帧里重新摆的，读早了拿到的是上一秒的盒子；连续两读一致才算落定。
+  // 名牌是在渲染帧里重新摆的，读早了拿到的是上一秒的盒子；连续两读一致才算落定。
   let theirs = await legacy.evaluate(anchors);
   for (let tries = 0; tries < 20; tries++) {
     await legacy.waitForTimeout(250);
@@ -904,7 +901,14 @@ test('the new engine blooms its night lamps without veiling the frame', async ({
   // 关掉动效再比：两档之间只许差在晕上，不许差在车流走了一格。
   await page.evaluate(() => window.__probe.n.setMotion(false));
   await page.waitForTimeout(1200);
-  const clip = { x: 300, y: 120, width: 900, height: 700 };
+  // 这块 900×700 的框跟着同一张留白表走（#191）：现版把地理中心放在抠掉留白那块窗口的正中，画面因此整体偏出
+  // (140, 70)，框若还钉在旧位置就量到的是塔南那排楼而不是原来那批灯。四个门槛（250／20,000／4／40）是量出来的
+  // 数，一个都不改——改的是框，量的还是那一块城市。
+  const shift = await page.evaluate(async () => {
+    const { paddingShift, viewportPadding } = await import('/src/padding.js');
+    return paddingShift(viewportPadding(false));
+  });
+  const clip = { x: Math.round(300 + shift.x), y: Math.round(120 + shift.y), width: 900, height: 700 };
   const shot = async (share) => {
     await page.evaluate(async (value) => {
       window.__probe.n.setBloom(value);
@@ -979,6 +983,7 @@ test('the new engine blooms its night lamps without veiling the frame', async ({
       // 同一档连拍两次必须逐字相同：不是的话这一项量的就是抖动而不是泛光（引擎按需出帧，改完可见性要等一帧）。
       repeat: A.reduce((worst, value, index) => Math.max(worst, Math.abs(value - C[index])), 0).toFixed(2) };
   }, [off, on, back, bare]);
+  console.log(`泛光那一块 ${clip.width}×${clip.height}（框跟着留白表偏出 ${shift.x},${shift.y}）：halo ${diff.halo}／lifted ${diff.lifted}／blown ${diff.blown}／中位 ${diff.medianOff}→${diff.medianOn}／地标那 ${diff.footprint} 颗被抬中位 ${diff.insideMedian}`);
   expect(Number(diff.repeat), `同一档连拍两次不一样（最大差 ${diff.repeat}）：这一项量的就不是泛光了`).toBe(0);
   expect(diff.halo, `泛光只把 ${diff.halo} 颗像素推到 100 灰度以上：晕看不见面（关掉那一档是 0）`).toBeGreaterThanOrEqual(250);
   expect(diff.lifted, `只有 ${diff.lifted} 颗像素被抬起来：这一档等于没开`).toBeGreaterThanOrEqual(20000);
@@ -1026,6 +1031,8 @@ test('the new engine says what it cannot do, and still has a zoom button', async
   expect(ui.note, '边界那一行没有"已接／还缺"这两段：').toMatch(/已接.*还缺/);
   const missing = /还缺(.*)$/.exec(ui.note)[1];
   expect(missing, `壳体与桥已经进这一侧了，边界那行还把它们算成缺的：${missing}`).not.toMatch(/壳体|塔身|桥/);
+  // #192-A：广场那四层地面（含米数铺装贴花）已经在这侧画出来了，"还缺"里再写它就是说谎。
+  expect(missing, `广场地面已经进这一侧了，边界那行还把它算成缺的：${missing}`).not.toMatch(/广场/);
   expect(missing, `边界那一行没点名还缺检索：${missing}`).toMatch(/检索/);
   expect(missing, `边界那一行没点名还缺导览：${missing}`).toMatch(/导览/);
   // 一次点击 = 一级，并且受限幅夹住（夹在相机里，不在按钮上）。
@@ -1070,8 +1077,8 @@ test('the new engine gives back every geometry, material and texture it made', a
   const live = await page.evaluate(() => window.__probe.n.nearTraffic());
   expect([live.cars, live.walkers, live.boats], `近场没装配，这条判据量的是空场景：${JSON.stringify(live)}`)
     .toEqual([1298, 1244, 18]);
-  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（55 几何 + 58 材质 + 28 贴图 = 141 样，
-  // 2026-10-14 实测，`scripts/probe-teardown-engine.mjs`；地标那一层进来之前是 29/31/11 = 71 样）。
+  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（59 几何 + 62 材质 + 29 贴图 = 150 样，
+  // 2026-10-16 实测：广场那一层进来之前是 55/58/28 = 141 样，地标那一层进来之前是 29/31/11 = 71 样）。
   const census = await page.evaluate(() => {
     const rows = [];
     const seen = new Set();
@@ -1101,13 +1108,13 @@ test('the new engine gives back every geometry, material and texture it made', a
     const named = {};
     window.__probe.n.scene.traverse((object) => { if (object.name && object.isObject3D && !named[object.name]) named[object.name] = object; });
     window.__groups = Object.fromEntries(['traffic-life', 'water-life', 'shore-wet', 'building-bases-group', 'river-sheen',
-      'landmarks'].map((name) => [name, named[name] ?? null]));
+      'landmarks', 'plaza-ground'].map((name) => [name, named[name] ?? null]));
     return { total: rows.length, byKind: rows.reduce((a, r) => { a[r.kind] = (a[r.kind] ?? 0) + 1; return a; }, {}),
       owners: [...new Set(rows.map((r) => r.owner))].sort(),
       missingGroups: Object.entries(window.__groups).filter(([, node]) => !node).map(([name]) => name) };
   });
   expect(census.byKind, `三样一样都不能缺（几何/材质/贴图）：${JSON.stringify(census.byKind)}`)
-    .toEqual({ geometry: 55, material: 58, texture: 28 });
+    .toEqual({ geometry: 59, material: 62, texture: 29 });
   expect(census.missingGroups, `这些组没挂进引擎的场景，"摘干净"那一半就量不到：${JSON.stringify(census.missingGroups)}`)
     .toEqual([]);
   // 漏了 #177 的那几组名字必须出现在台账里，否则这条判据量到的可能只是引擎自己那五块。
@@ -1121,6 +1128,11 @@ test('the new engine gives back every geometry, material and texture it made', a
     '184738716:crown', '511404889:crown', '184738716:podium', 'tower-model', 'beam', 'river-glow',
     '184738716:spill', '511404889:spill']) {
     expect(census.owners, `台账里没有 ${group}，地标那一层没整块挂进场景`).toContain(group);
+  }
+  // 广场那一层同理：三块板与那张乘性网格（连带它背后那张贴图）都要在台账里点名——
+  // 少一块就是有人搬了画面没搬 teardown（台账总数从 141 样涨到 150 样，多出来的九样就是这些名字与那张图）。
+  for (const group of ['plaza-lawn', 'plaza-stone', 'plaza-walk', 'canton-plaza-surface']) {
+    expect(census.owners, `台账里没有 ${group}，广场那一层没整块挂进场景`).toContain(group);
   }
   const after = await page.evaluate(() => {
     window.__probe.n.dispose();
@@ -1143,7 +1155,7 @@ test('the new engine gives back every geometry, material and texture it made', a
   // 还了资源不等于摘了节点：`group.clear()` 那一半单独钉，与 Node 侧那条 `[0, 0, 0]` 同一个口径。
   expect(after.left, `dispose 之后这些组里还留着节点：${JSON.stringify(after.left)}`)
     .toEqual({ 'traffic-life': 0, 'water-life': 0, 'shore-wet': 0, 'building-bases-group': 0, 'river-sheen': 0,
-      landmarks: 0 });
+      landmarks: 0, 'plaza-ground': 0 });
   expect(after.panel, 'dispose 之后读数面板还留在页面上').toBe(false);
   // 贴图归造它的那一方还（`boot.js` 那颗光晕、`scene.js` 那两张图集），这里只要求"有人还了"。
   expect(errors, `拆场景的过程中报了错：${JSON.stringify(errors)}`).toEqual([]);
@@ -1155,7 +1167,8 @@ test('the new engine gives back every geometry, material and texture it made', a
 // 不受光的半透明材质，像素仍然出自同一份 `waterTexture`（Node 那侧逐字节比过）。要钉的四件事全部是量出来的：
 // ① 名单同源；② 屏幕上正好 64 个 CSS 像素一圈、不随缩放胀大；③ 这一圈跟着镜头转；
 // ④ 平移时格子跟着江面走（这一格是最先做错的：那一版整张格子钉在视口上，现版那侧不是，见 `river.js` 顶上那段）。
-// 跨引擎对像素仍然不做：现版的取景带着 `setPadding`（#191），同一串 hash 两边差 140×70 像素。
+// 跨引擎不对像素：这一层的四件事全是"这一侧自己量出来的"（屏幕 64 CSS 像素一圈、跟着镜头转、平移时跟着江面走），
+// 两边同帧对像素那条路已经由 #191 收口，归 padding 那条判据管（见本文件"同一串 hash 框出同一张画面"那项）。
 test('the new engine lays the river sheen on the same water with a screen-sized tile that rides the ground', async ({ page }) => {
   test.setTimeout(540000);
   const errors = [];
@@ -1695,4 +1708,218 @@ test('the new engine stands the three landmark shells with their beam and spill 
   expect(await shells(15.5), '回到同一档，墙色没交回原来那一份：斜坡是个随机量').toEqual(near);
 
   expect(errors, `地标这一层跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+test('the new engine lays the plaza’s measured faces under its metric joints and reads them differently at each stage', async ({ page }) => {
+  test.setTimeout(260000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) errors.push(message.text()); });
+  await openEngine(page, 'three');
+  const setup = await page.evaluate(async () => {
+    const { neighborhood: n } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    window.__probe = { n };
+    // 动效必须按住：广场内外都站着会动的东西，两帧的差里混着它们，这一层的账就不干净。
+    n.setMotion(false);
+    const { carvePlaza } = await import('/src/plaza.js');
+    const { PLAZA_LAYERS } = await import('/src/engine/plaza.js');
+    const read = async (file) => (await (await fetch(`/data/${file}.geojson`)).json()).features;
+    const [water, greens, blocks, streets] = await Promise.all(
+      ['canton-water', 'canton-greens', 'canton-blocks', 'canton-streets'].map(read));
+    const plaza = carvePlaza({ greens, water, blocks, streets });
+    // 取样点不手摆：取最大那块硬质面的环心，与贴图里那一格石材是同一块 OSM 面。
+    const stone = plaza.features.filter((feature) => feature.properties.kind === 'stone')
+      .sort((a, b) => (b.properties.area ?? 0) - (a.properties.area ?? 0))[0];
+    const ring = stone.geometry.coordinates[0];
+    const centre = [ring.reduce((sum, point) => sum + point[0], 0) / ring.length,
+      ring.reduce((sum, point) => sum + point[1], 0) / ring.length];
+    await n.setView({ zoom: 17, pitch: 0, bearing: 0, center: { lng: centre[0], lat: centre[1] } });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    document.querySelectorAll('.landmark').forEach((node) => { node.style.visibility = 'hidden'; });
+    document.querySelector('.engine-stats').style.visibility = 'hidden';
+    const named = (name) => { let found = null; n.scene.traverse((object) => { if (object.name === name) found = object; }); return found; };
+    window.__plaza = { group: named('plaza-ground'), decal: named('canton-plaza-surface') };
+    const spot = n.screen({ lng: centre[0], lat: centre[1], altitude: PLAZA_LAYERS.stone });
+    return { area: stone.properties.area, spot, layers: { ...PLAZA_LAYERS },
+      counts: n.counts().plaza, hasGroup: Boolean(window.__plaza.group), hasDecal: Boolean(window.__plaza.decal) };
+  });
+  expect(setup.hasGroup, '引擎的场景里没有 `plaza-ground` 那一组').toBe(true);
+  expect(setup.hasDecal, '引擎的场景里没有那张乘性网格').toBe(true);
+  expect(setup.spot.onScreen, `广场那块硬质面的中心没在画面里：${JSON.stringify(setup.spot)}`).toBe(true);
+  expect(setup.counts.classes, `四类面的账与出厂快照对不上：${JSON.stringify(setup.counts.classes)}`)
+    .toEqual({ lawn: 20, pool: 1, stone: 4, walk: 17, missing: false });
+  expect(setup.counts.surface, `镜头已经在 17 级，读数却说那张网格没在画：${JSON.stringify(setup.counts)}`).toBe(true);
+  // 取样点是快照里那块最大的硬质面（way/1332423226，2,390 m²），不是手挑的一个像素。
+  expect(setup.area, `取样那块面的面积不再是 2,390 m²：${setup.area}`).toBe(2390);
+
+  const clip = { x: Math.round(setup.spot.x) - 30, y: Math.round(setup.spot.y) - 30, width: 60, height: 60 };
+  const show = (part, visible) => page.evaluate(({ part, visible }) => { window.__plaza[part].visible = visible; }, { part, visible });
+  // 摘掉那张网格不能翻 `visible`：每帧那句 `plaza.setZoom(view.zoom)` 会当场把它翻回来。
+  // 把它搬到 plates 底下（0.31~0.33 那三块板都写着深度），深度测试就把它整块丢掉，等于这一层没画。
+  const neutralise = (on) => page.evaluate(({ on, y }) => {
+    window.__plaza.decal.visible = true;
+    window.__plaza.decal.position.y = on ? y : 0;
+  }, { on, y: setup.layers.surface });
+  const shot = async () => {
+    await page.waitForTimeout(260);
+    const source = (await page.screenshot({ clip })).toString('base64');
+    return { source, ...(await page.evaluate(async ({ source }) => {
+      const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${source}`)).blob());
+      const surface = new OffscreenCanvas(image.width, image.height);
+      const context = surface.getContext('2d');
+      context.drawImage(image, 0, 0);
+      const { data } = context.getImageData(0, 0, image.width, image.height);
+      const rgb = [0, 0, 0];
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+        for (let channel = 0; channel < 3; channel++) rgb[channel] += data[i + channel];
+      }
+      const pixels = data.length / 4;
+      return { mean: +(sum / pixels).toFixed(2), rgb: rgb.map((value) => Math.round(value / pixels)), pixels };
+    }, { source })) };
+  };
+  // 三发：整组摘掉（引擎原来的画法）、留着三块板但把网格压到板底下（平色面）、两块都在（乘上缝与收边）。
+  await show('group', false);
+  const bare = await shot();
+  await show('group', true);
+  await neutralise(false);
+  const plates = await shot();
+  await neutralise(true);
+  const on = await shot();
+
+  // ① 那三块板真的盖住了公园面：同一台镜头、同一个 60×60 的框，只翻这一组的可见度。
+  //    摘掉那一格是 `ground-park` 的绿（绿压红），留着那一格是石材（红压蓝）。
+  expect(bare.rgb[1] - bare.rgb[0], `摘掉广场那一层之后那一格还是绿的（${bare.rgb.join(',')}）——那三块板没盖住 park 面`).toBeGreaterThan(10);
+  expect(plates.rgb[0] - plates.rgb[2], `留着那一层那一格还是绿的（${plates.rgb.join(',')}），石材面没画上`).toBeGreaterThan(10);
+  // ② 乘性贴图只会压暗：整张图加进来之后平均亮度必须降、必须有一批像素真的降了、且一个像素都不许变亮。
+  expect(on.mean, `贴上那张乘性网格之后平均亮度只降了 ${(plates.mean - on.mean).toFixed(2)}（${plates.mean} → ${on.mean}）`)
+    .toBeLessThanOrEqual(plates.mean - 3);
+  const pair = await page.evaluate(async ({ a, b }) => {
+    const load = async (source) => {
+      const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${source}`)).blob());
+      const surface = new OffscreenCanvas(image.width, image.height);
+      const context = surface.getContext('2d');
+      context.drawImage(image, 0, 0);
+      return context.getImageData(0, 0, image.width, image.height).data;
+    };
+    const x = await load(a), y = await load(b);
+    const luma = (data, i) => 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    let changed = 0, brighter = 0;
+    for (let i = 0; i < x.length; i += 4) {
+      const d = luma(y, i) - luma(x, i);
+      if (Math.abs(d) > 2) changed += 1;
+      if (d > 2) brighter += 1;
+    }
+    return { changed, brighter };
+  }, { a: plates.source, b: on.source });
+  expect(pair.changed, `那张网格只动了 ${pair.changed} 个像素（60×60 的框里），等于没画`).toBeGreaterThanOrEqual(400);
+  expect(pair.brighter, `乘性贴图把 ${pair.brighter} 个像素画亮了，那张图不再是乘数`).toBe(0);
+  // ③ 门控在页面上也认这一帧的镜头：退到 15.5 那一档，读数必须报"没在画"。
+  const gate = await page.evaluate(async () => {
+    const n = window.__probe.n;
+    await n.setView({ ...n.view(), zoom: 15.5 });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const low = n.counts().plaza.surface;
+    await n.setView({ ...n.view(), zoom: 17 });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    return { low, high: n.counts().plaza.surface };
+  });
+  expect([gate.low, gate.high], `16.5 那道门在页面上没起作用（15.5 报 ${gate.low}、17 报 ${gate.high}）`).toEqual([false, true]);
+  expect(errors, `广场这一层跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+test('the same hash lands on the same framed picture on both engines, because both read one padding table', async ({ page }) => {
+  test.setTimeout(600000);
+  // #191 之前这一格差 140×70 CSS 像素：现版把地理中心放在抠掉留白之后那块窗口的正中，新引擎放在画布正中。
+  // 两边的读数各自来自自己那个投影器（`map.project` 与 `neighborhood.screen`），不互比像素。
+  const POINTS = { center: [113.31913, 23.1095], north: [113.31913, 23.1122], east: [113.3223, 23.1095] };
+  const legacy = await page.context().newPage();
+  const read = async (target, engine, size) => {
+    await target.setViewportSize(size);
+    await openEngine(target, engine);
+    return target.evaluate(async ({ points, three }) => {
+      const { neighborhood: n } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+      const map = three ? null : n.map;
+      const box = document.querySelector('#map canvas').getBoundingClientRect();
+      const at = ([lng, lat]) => {
+        const p = three ? n.screen({ lng, lat, altitude: 0 }) : map.project({ lng, lat });
+        return [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10];
+      };
+      return { canvas: [Math.round(box.width), Math.round(box.height)], padding: map ? map.getPadding() : null,
+        points: Object.fromEntries(points.map(([key, value]) => [key, at(value)])) };
+    }, { points: Object.entries(POINTS), three: engine === 'three' });
+  };
+  for (const size of [{ width: 1440, height: 960 }, { width: 390, height: 844 }]) {
+    const theirs = await read(legacy, 'maplibre', size);
+    const mine = await read(page, 'three', size);
+    const shift = { x: (theirs.padding.left - theirs.padding.right) / 2, y: (theirs.padding.top - theirs.padding.bottom) / 2 };
+    const off = (sample) => ({ center: sample.points.center.map((value, index) => value - (sample.canvas[index] / 2 + (index ? shift.y : shift.x))) });
+    // ① 每一边自己那一侧：地理中心确实偏出了这一档留白该偏的像素（现版侧读 `getPadding()`，新引擎侧读它自己的 `screen()`）。
+    const legacyOff = off(theirs).center;
+    expect([Math.round(legacyOff[0]), Math.round(legacyOff[1])],
+      `${size.width}×${size.height} 上现版那侧的地理中心没落在抠掉留白那块窗口的正中：${JSON.stringify({ ...theirs, shift })}`)
+      .toEqual([0, 0]);
+    // ② 两边并排：同一个点偏出的像素必须一样——差值就是账上那 140×70，收口之后必须小于 2 px。
+    for (const key of Object.keys(POINTS)) {
+      const delta = POINTS[key].map((_, index) => Math.abs(mine.points[key][index] - theirs.points[key][index]));
+      expect(delta[0], `${size.width}×${size.height} 上 ${key} 那一点横向差 ${delta[0]} px（现版 ${theirs.points[key]}，新引擎 ${mine.points[key]}）`)
+        .toBeLessThan(2);
+      expect(delta[1], `${size.width}×${size.height} 上 ${key} 那一点纵向差 ${delta[1]} px（现版 ${theirs.points[key]}，新引擎 ${mine.points[key]}）`)
+        .toBeLessThan(2);
+    }
+    console.log(`${size.width}×${size.height} 现版 ${JSON.stringify(theirs.points)} | 新引擎 ${JSON.stringify(mine.points)} | 留白 ${JSON.stringify(theirs.padding)} → 偏出 (${shift.x}, ${shift.y})`);
+  }
+  await legacy.close();
+});
+
+test('the new engine stands the deck’s walkers on the surface it actually drew, and nobody else off the ground', async ({ page }) => {
+  test.setTimeout(200000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  page.on('console', (message) => { if (['error', 'warning'].includes(message.type())) errors.push(message.text()); });
+  const { DECK_TOP_METRES } = await import('../src/landmark-forms.js');
+  await openEngine(page, 'three');
+  const read = await page.evaluate(async () => {
+    const { neighborhood: n } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    const node = (name) => { let found = null; n.scene.traverse((object) => { if (object.name === name) found = object; }); return found; };
+    // 两份读数各自来自这一侧：桥面顶面取壳体几何的真 bbox，站着的人取实例矩阵的第 13 个分量——都不碰 THREE 的全局。
+    const deck = node('1313608038');
+    if (!deck) return { missing: '壳体里没有海心桥' };
+    deck.geometry.computeBoundingBox();
+    const world = deck.matrixWorld.elements;
+    const at = (name) => {
+      const mesh = node(name);
+      const array = mesh.instanceMatrix.array;
+      const heights = new Map();
+      for (let index = 0; index < mesh.count; index++) {
+        const y = array[index * 16 + 13];
+        heights.set(y, (heights.get(y) ?? 0) + 1);
+      }
+      return { count: mesh.count, rows: [...heights].sort((a, b) => b[1] - a[1]) };
+    };
+    return {
+      deck: { top: deck.geometry.boundingBox.max.y, minY: deck.geometry.boundingBox.min.y,
+        y: world[13], yScale: world[5] },
+      walkers: at('traffic-walkers'), cars: at('traffic-cars'),
+      near: n.nearTraffic(),
+    };
+  });
+  expect(read.missing, read.missing ?? '').toBeUndefined();
+  expect([read.deck.y, read.deck.yScale], `桥体那层被整体扯移了，bbox 不再等于世界顶面：${JSON.stringify(read.deck)}`)
+    .toEqual([0, 1]);
+  // ① 画出来的那一层：顶面就是 `base + thickness`。
+  expect(Math.round(read.deck.top * 1000) / 1000, `桥面顶面实测 ${read.deck.top} m，与 DECK_TOP_METRES 分家`)
+    .toBe(DECK_TOP_METRES);
+  expect(Math.round(read.deck.minY * 1000) / 1000, '桥面底面不在净空那一米上').toBe(12);
+  // ② 站着的那一批：只有海心桥那 24 个行人离地，而且逐字站在①那个顶面上；其余 1,220 个还在地面。
+  expect(read.walkers.rows.map(([y, count]) => [Math.round(y * 1000) / 1000, count]),
+    `行人的离地高度汇总不对（按台数从多到少）：${JSON.stringify(read.walkers.rows)}`)
+    .toEqual([[0, 1220], [DECK_TOP_METRES, 24]]);
+  // ③ 引擎只把这一座桥画成了体，其余桥路的车离地就是浮桥。
+  expect(read.cars.rows.some(([y]) => y > 1), `引擎把车抬到了没画出来的桥面上：${JSON.stringify(read.cars.rows)}`)
+    .toBe(false);
+  // ④ 这一页确实有近场与桥：没有的话上面三条全在空数组上永真。
+  expect([read.near.cars, read.near.walkers], `近场没装配：${JSON.stringify(read.near)}`).toEqual([1298, 1244]);
+  expect(errors, `桥面标高这一块跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
 });

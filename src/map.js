@@ -5,6 +5,7 @@ import { ATMOSPHERES, ATMOSPHERE_MS, HAZE_REVEAL, MOOD, PATTERN_SWAP_MS, SKY_BLE
 import { featureCollection, radiusPolygon } from './geo.js';
 import { insideRing, interiorPoint } from './buildings.js';
 import { formatView, parseView } from './link.js';
+import { isLandscapeViewport, isMobileViewport, viewportPadding } from './padding.js';
 import { mapIcon } from './icons.js';
 import { poisGeoJSON } from './pois.js';
 import { TOWER_MODES, createTowerLayer, towerBreath, towerHue } from './tower.js';
@@ -113,13 +114,10 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   const blocks = (await blocksResponse.json()).features;
   const waterFaces = (await waterResponse.json()).features;
   const style = neighborhoodStyle(await response.json());
-  const mobile = () => window.innerWidth <= 760;
-  const landscape = () => window.matchMedia('(min-width: 568px) and (max-width: 1000px) and (max-height: 500px)').matches;
+  const mobile = isMobileViewport;
+  const landscape = isLandscapeViewport;
   let panelOpen = false;
-  const padding = () => landscape()
-    ? { top: 180, left: 20, right: panelOpen ? 330 : 20, bottom: 65 }
-    : mobile() ? { top: 255, left: 15, right: 15, bottom: panelOpen ? Math.round(innerHeight * 0.38 + 129) : 110 }
-      : { top: 200, left: 280, right: panelOpen ? 360 : 0, bottom: 60 };
+  const padding = () => viewportPadding(panelOpen);
   function lensPadding() {
     const box = document.querySelector('.scene-key').getBoundingClientRect();
     if (!box.height) return padding();

@@ -6,7 +6,8 @@ import { DEFAULT_CENTER } from '../src/config.js';
 import { TRAFFIC_LIFE_RADIUS, WALKER_MIN_ZOOM, createTrafficLife, deckHeights, trafficScale } from '../src/traffic-life.js';
 import { BOAT_LIFE_RADIUS, createWaterLife } from '../src/waterlife.js';
 import { deriveJunctions } from '../src/junctions.js';
-import { createNearField } from '../src/near-field.js';
+import { createNearField, engineDecks } from '../src/near-field.js';
+import { LANDMARK_FORMS, DECK_TOP_METRES } from '../src/landmark-forms.js';
 
 // 判据钉的是"装配器把两份现成的算法接成了口令上的一个"，所以数据用出厂快照：这两条渲染路径喂进来的就是这几份文件。
 const read = (file) => JSON.parse(readFileSync(new URL(`../public/data/${file}`, import.meta.url), 'utf8')).features;
@@ -14,12 +15,15 @@ const streets = read('canton-streets.geojson');
 const river = read('canton-river.geojson');
 const water = read('canton-water.geojson');
 const bridges = read('canton-bridges.geojson');
+const shells = read('haixin-bridge.geojson');
 const decks = deckHeights(bridges);
+// 引擎那一次装配喂进壳体的是这一份，所以桥面表也从同一份派生——不是从现版那 94 块桥面件。
+const engineDeckTable = engineDecks(shells);
 
 // 现版那一次装配（`map.js`）：桥面表来自 crossings 快照，光晕贴图要 DOM，测试里就没有贴图——它不影响这几条数。
 const asLegacy = () => createNearField({ streets, river, shore: water, origin: DEFAULT_CENTER, decks, sprite: null });
-// 引擎那一次（`engine/boot.js`）：岸线照传（船要被夹回水里），`decks` 故意不传，因为这一侧还没有桥体（#170）。
-const asEngine = () => createNearField({ streets, river, shore: water, origin: DEFAULT_CENTER, sprite: null });
+// 引擎那一次（`engine/boot.js`）：岸线照传（船要被夹回水里），桥面表只认这一侧真画成体的那几座（#192）。
+const asEngine = () => createNearField({ streets, river, shore: water, origin: DEFAULT_CENTER, decks: engineDeckTable, sprite: null });
 
 const groupOf = (near, name) => near.groups.find((group) => group.name === name);
 // 装配器自己派生路口（两条渲染路径因此不可能各算一套），并排比的那一份要拿同一把参数自己派生一次。
@@ -96,16 +100,44 @@ test('装配器传下去的每一份参数都落到了实例矩阵上，漏一�
   }
 });
 
-test('桥面上那批车跟着装配器走，而引擎那一侧按 #170 留在地面', () => {
-  const liftedOf = (near) => {
-    const vehicles = meshOf(near, 'traffic-life', 'traffic-cars');
-    let lifted = 0;
-    for (let index = 0; index < vehicles.count; index++) if (shiftOf(vehicles, index).y > 1) lifted++;
-    return lifted;
+test('桥面标高：现版那侧抬整座桥，引擎这一侧只抬它真画成体的那一条', () => {
+  // 按实例数而不是按车距：这是"表没接上"唯一的抓法——聚合数（台数、外缘）对 24 个站上升的行人不敏感。
+  const liftedOf = (near, name) => {
+    const vehicles = meshOf(near, 'traffic-life', name);
+    const at = new Map();
+    for (let index = 0; index < vehicles.count; index++) {
+      const y = shiftOf(vehicles, index).y;
+      if (y > 1) at.set(y, (at.get(y) ?? 0) + 1);
+    }
+    return { count: [...at.values()].reduce((sum, n) => sum + n, 0), heights: [...at.entries()].sort((a, b) => a[0] - b[0]) };
   };
-  // 门槛与 `traffic-life.test.js` 那一条同一个口径（按实例数而不是按车距），防的是"表没接上"（那是 0）。
-  assert.ok(liftedOf(asLegacy()) > 50, `装配器把桥面表弄丢了：桥上只剩 ${liftedOf(asLegacy())} 辆车`);
-  assert.equal(liftedOf(asEngine()), 0, '这一侧还没有桥体，车抬起来会浮在平色路带上面——#170 迁桥体时这条要跟着改');
+  // 门槛与 `traffic-life.test.js` 那一条同一个口径，防的是"表没接上"（那是 0）。
+  assert.ok(liftedOf(asLegacy(), 'traffic-cars').count > 50,
+    `装配器把桥面表弄丢了：桥上只剩 ${liftedOf(asLegacy(), 'traffic-cars').count} 辆车`);
+  const engine = asEngine();
+  // 引擎这一侧画成体的只有海心桥，而它是一座人行桥：所以抬起来的必须全是行人，一辆车都不许离地。
+  assert.equal(liftedOf(engine, 'traffic-cars').count, 0, '这一侧没把任何车行桥画成体，车离地就是浮在一道没画出来的桥面上');
+  const walkers = liftedOf(engine, 'traffic-walkers');
+  assert.deepEqual(walkers.heights, [[DECK_TOP_METRES, 24]],
+    `引擎抬起来的行人必须逐字站在壳体桥面那一层的顶上、且只有海心桥那 24 个：实测 ${JSON.stringify(walkers.heights)}`);
+});
+
+test('引擎那张桥面表只认这一侧画成体的桥，地面同名的路与没画的桥都不跟着抬', () => {
+  assert.deepEqual([...engineDeckTable.byName], [['海心桥', DECK_TOP_METRES]],
+    '桥面表里进了这一侧没画成体的桥——同名继承会把车抬到平色路带上面');
+  assert.deepEqual([...engineDeckTable.byOsmId], [[1313608038, DECK_TOP_METRES]]);
+  // 那一个数必须是**画出来的那一层**的顶：壳体自己按 `base + thickness` loft，抬人按同一个数。
+  const form = LANDMARK_FORMS[1313608038];
+  assert.equal(DECK_TOP_METRES, form.base + form.thickness, '桥面顶那一个数与画出来的那一层分家了');
+  // 海心桥那四条 way（两条步道、两条台阶）都是 `bridge`＋`layer=1`，所以它们继承同名桥面的顶。
+  const ways = streets.filter((feature) => feature.properties.name === '海心桥');
+  assert.equal(ways.length, 4, '海心桥在路网快照里不是四条 way，继承那条规则的量纲变了');
+  assert.deepEqual(ways.map((feature) => engineDeckTable.heightOf(feature)), Array(4).fill(DECK_TOP_METRES));
+  // 反过来：地面上同名的路（`layer` 不到 1、也不是桥）不许跟着抬，猎德大桥那一侧这一侧还没画成体。
+  const ground = { properties: { name: '海心桥', class: 'footway', layer: 0 } };
+  assert.equal(engineDeckTable.heightOf(ground), 0, '地面同名的路被抬起来了');
+  assert.equal(engineDeckTable.heightOf({ properties: { name: '猎德大桥', class: 'secondary', brunnel: 'bridge' } }), 0,
+    '引擎没画成体的桥把车抬走了');
 });
 
 test('车、人与船共用同一把绝对秒，一次推进三组都走', () => {
