@@ -509,7 +509,6 @@ test('in-memory defect injection: each key behavior rejects a broken implementat
 });
 
 const tourSource = readFileSync(new URL('../src/tour.js', import.meta.url), 'utf8');
-const { report: { tourAnchors } } = JSON.parse(readFileSync(new URL('../public/data/jingtai-metadata.json', import.meta.url), 'utf8'));
 
 // A fresh worker evaluates the REAL config after setting its own location. Neither
 // the parent globals/module cache nor another test process ever sees that location.
@@ -533,20 +532,6 @@ function snapshotInScene(source, search) {
     });
   });
 }
-
-// Pin source identity independently, then obtain the park interiors and mountain
-// boundary vertex from the shipped metadata, rather than from tour.js itself.
-function anchor(sourceId) {
-  const { lng, lat } = tourAnchors.find((entry) => entry.sourceId === sourceId);
-  return { sourceId, osmId: Number(sourceId.split('/')[1]), center: [lng, lat] };
-}
-
-const schoolStops = [
-  { name: '景泰小学（景泰校区）', bank: '校园', center: [113.26646, 23.17107], zoom: 16.7, pitch: 57, bearing: 0, osmId: 1178149399, sourceId: 'way/1178149399' },
-  { name: '三泰公园东苑', bank: '街区', ...anchor('way/337541381'), zoom: 17.5, pitch: 50, bearing: -20 },
-  { name: '三泰公园西苑', bank: '街区', ...anchor('way/337541386'), zoom: 17.5, pitch: 50, bearing: 25 },
-  { name: '白云山林地边界', bank: '山脚', ...anchor('relation/8249243'), zoom: 16.6, pitch: 55, bearing: 70 },
-];
 
 // All legacy values, including camera angles and wording, remain contractual.
 const cantonStops = [
@@ -584,59 +569,24 @@ function stopContracts(expectedStops) {
   })));
 }
 
-function contract(name, check, from, to) {
-  return { name, check, mutate: (source) => replaceOnce(source, from, to) };
-}
-
-const schoolContracts = [
-  contract('exactly four school stops', ({ TOUR_STOPS }) => assert.equal(TOUR_STOPS.length, 4), '] : [', '].slice(0, 3) : ['),
-  contract('school dwell remains 7000 ms', ({ TOUR_DWELL_MS }) => assert.equal(TOUR_DWELL_MS, DWELL), 'TOUR_DWELL_MS = 7000', 'TOUR_DWELL_MS = 6000'),
-  ...stopContracts(schoolStops),
-  contract('campus address', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[0].description, /云龙路38号/), '云龙路38号', '云龙路39号'),
-  contract('real campus boundary', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[0].description, /校园真实边界/), '校园真实边界', '校园示意范围'),
-  contract('no mapped campus sports', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[0].description, /目标校园内无 pitch\/track/), '目标校园内无 pitch/track', '目标校园内有 pitch/track'),
-  contract('no red running track claim', ({ TOUR_STOPS }) => assert.doesNotMatch(TOUR_STOPS.map((stop) => stop.description).join('\n'), /展示[^。；]*红(?:色)?跑道/), '未生成跑道。', '未生成跑道。展示校园红色跑道。'),
-  contract('east park description', ({ TOUR_STOPS }) => assert.ok(TOUR_STOPS[1].description.trim().length > 0), '近看三泰公园东苑，镜头落在实际 OSM 公园多边形内部。', ''),
-  contract('west park description', ({ TOUR_STOPS }) => assert.ok(TOUR_STOPS[2].description.trim().length > 0), '转向三泰公园西苑，查看街区中的另一片真实公园绿地。', ''),
-  contract('OSM woodland boundary only', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[3].description, /仅标示.*OSM 林地边界/), 'OSM 林地边界', '山顶全景'),
-  contract('not a viewpoint', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[3].description, /不是观景台/), '不是观景台', '这里是观景台'),
-  contract('no reconstructed terrain elevation', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[3].description, /未重建三维高程/), '未重建三维高程', '已重建三维高程'),
-  contract('foothill camera tour', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[3].description, /山脚镜头导览/), '山脚镜头导览', '登山导航'),
-  contract('not a walking route', ({ TOUR_STOPS }) => assert.match(TOUR_STOPS[3].description, /不是步行路线/), '不是步行路线', '这就是步行路线'),
-];
 const cantonContracts = stopContracts(cantonStops);
 
-// Reuse the identity assertion to test scene selection and school ordering too.
-const schoolIdentity = schoolContracts.find(({ name }) => name === '景泰小学（景泰校区）: name').check;
-const branchMutations = [
-  { search: '?scene=jingtai', ...contract('school scene ignored', schoolIdentity, "SCENE.id === 'jingtai'", 'false') },
-  { search: '?scene=jingtai', ...contract('school order reversed', schoolIdentity, '] : [', '].reverse() : [') },
-  { search: '?scene=canton', ...contract('school leaks into canton', cantonContracts[0].check, "SCENE.id === 'jingtai'", 'true') },
-];
-
-test('school tour contract: real config selects four evidence-backed foothill stops', async () => {
-  const implementation = await snapshotInScene(tourSource, '?scene=jingtai');
-  for (const { check } of schoolContracts) check(implementation);
-});
-
-test('default and explicit canton scenes retain every original stop value', async () => {
-  for (const search of ['', '?scene=canton']) {
+test('the tower tour is the only tour: default, explicit and stale scene queries all keep every original stop value', async () => {
+  // `?scene=jingtai` 还活在别人收藏的旧链接里，它现在只能落到塔这一侧。
+  for (const search of ['', '?scene=canton', '?scene=jingtai']) {
     const implementation = await snapshotInScene(tourSource, search);
+    assert.equal(implementation.TOUR_STOPS.length, 4, search);
+    assert.equal(implementation.TOUR_DWELL_MS, DWELL, search);
     for (const { check } of cantonContracts) check(implementation);
   }
 });
 
-test('in-memory scene defects: every new contract assertion rejects its own mutant', async (t) => {
-  const mutants = [
-    ...schoolContracts.map((entry) => ({ search: '?scene=jingtai', ...entry })),
-    ...cantonContracts.map((entry) => ({ search: '?scene=canton', ...entry })),
-    ...branchMutations,
-  ];
-  for (const { name, search, check, mutate } of mutants) {
+test('in-memory tour defects: every contract assertion rejects its own mutant', async (t) => {
+  for (const { name, check, mutate } of cantonContracts) {
     await t.test(name, async () => {
-      // Worker/import failures are NOT assertion kills. Only the same contract
-      // used above may reject the successfully evaluated in-memory source mutant.
-      const implementation = await snapshotInScene(mutate(tourSource), search);
+      // Import failures are NOT assertion kills. Only the same contract used above
+      // may reject the successfully evaluated in-memory source mutant.
+      const implementation = await snapshotInScene(mutate(tourSource), '?scene=canton');
       assert.throws(() => check(implementation), { name: 'AssertionError', code: 'ERR_ASSERTION' }, `surviving mutant: ${name}`);
     });
   }

@@ -2,7 +2,7 @@
 // 这一层能画什么取决于本地快照里有什么。Phase 0 只有道路与一条按实测河宽描出的示意江带；Phase 1 补了一次
 // Overpass 提取（`scripts/prepare-canton-surface.mjs`），把底图那四层真几何取回本地：
 //   · 水系  `canton-water.geojson`   41 面 —— **示意江带由它取代**：岸线是真的，带宽就不用猜了
-//   · 绿地  `canton-greens.geojson`  272 面（公园/草地/林地/湿地/球场），景泰侧走 `jingtai-grounds.geojson`
+//   · 绿地  `canton-greens.geojson`  272 面（公园/草地/林地/湿地/球场）
 //   · 地块  `canton-blocks.geojson`  595 面（居住/学校/医院/行政/行人区）
 //   · 道路  `canton-streets.geojson` 504 条 LineString，按 `class` 分级取宽
 // 边界逐字取 OSM：闭合 way 成环，multipolygon 按成员 way 首尾拼接，开口的（12 条"缓跑径"跑道环）整条不取，

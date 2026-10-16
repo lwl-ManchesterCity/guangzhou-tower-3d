@@ -5,14 +5,11 @@ import { ATMOSPHERES, ATMOSPHERE_MS, HAZE_REVEAL, MOOD, PATTERN_SWAP_MS, SKY_BLE
 import { featureCollection, radiusPolygon } from './geo.js';
 import { insideRing, interiorPoint } from './buildings.js';
 import { formatView, parseView } from './link.js';
-import { FLY_IN_MS } from './scene-flight.js';
-import { groupBuildings, groupDisplay, groupStats } from './groups.js';
 import { mapIcon } from './icons.js';
 import { poisGeoJSON } from './pois.js';
 import { TOWER_MODES, createTowerLayer, towerBreath, towerHue } from './tower.js';
 import { createTour, TOUR_STOPS } from './tour.js';
 import { heightColor, heightSummary, lensFilter, UNKNOWN_HEIGHT_COLOR } from './lens.js';
-import { addGrounds, groundColors } from './grounds.js';
 import { schematicDisplayHeights } from './block-layout.js';
 import { FACADE_SHAPES, FACADE_THEMES, GLOW_IMAGE_PREFIX, GLOW_NEAR_IMAGE_PREFIX, LAMP_ALT_IMAGE_PREFIX, LAMP_NEAR_ALT_IMAGE_PREFIX, LAMP_GROUPS, LAMP_KEYS, LAMP_PERIODS_MS, LIGHT_BANDS, LIGHT_FADES, LIGHT_IMAGE_PREFIX, LIGHT_NEAR_IMAGE_PREFIX, LIGHT_NEAR_ZOOM, LIGHT_TEMPERATURES, WINDOWS_OFF_IMAGE, facadeImage, facadeOptions, facadePattern, facadeTexture, glowTexture, lampBreather, lampDarkness, lampTemperatureDeal, lampWeight, lightTexture, lampBandExpression, windowsOffTile } from './facade.js';
 import { WATER_IMAGE_PREFIX, WATER_THEMES, riverOpacityExpression, scrollWater, waterTexture } from './water.js';
@@ -29,15 +26,14 @@ import { GLYPH_BOX, LANDMARK_GLYPHS } from './landmark-glyphs.js';
 import { FORM_OSM_IDS, createLandmarkForms } from './landmark-forms.js';
 
 maplibregl.setWorkerUrl(workerUrl);
-const school = SCENE.id === 'jingtai';
 const center = [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat];
 const distance = ['distance', { type: 'Point', coordinates: center }];
-// Plain OSM way ids stay numbers; a namespaced id (relation/…, eastasia/…) is only meaningful as text, and the card
-// seat hit-test compares it with String(), so keeping the string is what lets a non-OSM block avoid covering itself.
+// Plain OSM way ids stay numbers; a namespaced id (relation/…) is only meaningful as text, and the card seat hit-test
+// compares it with String(), so keeping the string is what lets a relation avoid covering itself.
 const buildingId = (id) => (id === undefined || id === null ? id : /^\d+$/.test(String(id)) ? Number(id) : String(id));
 
-// Polygon-only subset of jingtai-data.geometryPoint: keep data preparation and walking graphs out of the client.
-// The current building snapshots are all Polygons; holes must participate even for unnamed, unindexed relations.
+// 只认 Polygon 的取点：数据准备与可步行图留在 Node 那侧，不进客户端这一份。
+// 眼下的建筑快照全是 Polygon，而空洞必须参与—— unnamed、没进索引的 relation 也一样要把点落在肉上。
 function geometryPoint(geometry) {
   const polygon = geometry.coordinates;
   const contains = (point) => insideRing(polygon[0], ...point) && !polygon.slice(1).some((ring) => insideRing(ring, ...point));
@@ -87,51 +83,43 @@ function neighborhoodStyle(style) {
   return style;
 }
 
-export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInteraction, onTourChange, onLensChange, onMotionChange, onError, arrive = null }) {
-  const [response, buildingsResponse, bridgeResponse, crossingsResponse, riverResponse, streetsResponse, greensResponse, blocksResponse, waterResponse, groundsResponse, roadsResponse] = await Promise.all([
+export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInteraction, onTourChange, onLensChange, onMotionChange, onError }) {
+  const [response, buildingsResponse, bridgeResponse, crossingsResponse, riverResponse, streetsResponse, greensResponse, blocksResponse, waterResponse] = await Promise.all([
     fetch(MAP_STYLE_URL, { signal: AbortSignal.timeout(25000) }),
     fetch(`${import.meta.env.BASE_URL}data/${SCENE.buildings}`, { signal: AbortSignal.timeout(25000) }),
-    school ? null : fetch(`${import.meta.env.BASE_URL}data/haixin-bridge.geojson`, { signal: AbortSignal.timeout(25000) }),
-    school ? null : fetch(`${import.meta.env.BASE_URL}data/canton-bridges.geojson`, { signal: AbortSignal.timeout(25000) }),
-    school ? null : fetch(`${import.meta.env.BASE_URL}data/canton-river.geojson`, { signal: AbortSignal.timeout(25000) }),
-    school ? null : fetch(`${import.meta.env.BASE_URL}data/canton-streets.geojson`, { signal: AbortSignal.timeout(25000) }),
-    school ? null : fetch(`${import.meta.env.BASE_URL}data/canton-greens.geojson`, { signal: AbortSignal.timeout(25000) }),
-    school ? null : fetch(`${import.meta.env.BASE_URL}data/canton-blocks.geojson`, { signal: AbortSignal.timeout(25000) }),
-    school ? null : fetch(`${import.meta.env.BASE_URL}data/canton-water.geojson`, { signal: AbortSignal.timeout(25000) }),
-    school ? fetch(`${import.meta.env.BASE_URL}data/${SCENE.grounds}`, { signal: AbortSignal.timeout(25000) }) : null,
-    school ? fetch(`${import.meta.env.BASE_URL}data/jingtai-roads.geojson`, { signal: AbortSignal.timeout(25000) }) : null,
+    fetch(`${import.meta.env.BASE_URL}data/haixin-bridge.geojson`, { signal: AbortSignal.timeout(25000) }),
+    fetch(`${import.meta.env.BASE_URL}data/canton-bridges.geojson`, { signal: AbortSignal.timeout(25000) }),
+    fetch(`${import.meta.env.BASE_URL}data/canton-river.geojson`, { signal: AbortSignal.timeout(25000) }),
+    fetch(`${import.meta.env.BASE_URL}data/canton-streets.geojson`, { signal: AbortSignal.timeout(25000) }),
+    fetch(`${import.meta.env.BASE_URL}data/canton-greens.geojson`, { signal: AbortSignal.timeout(25000) }),
+    fetch(`${import.meta.env.BASE_URL}data/canton-blocks.geojson`, { signal: AbortSignal.timeout(25000) }),
+    fetch(`${import.meta.env.BASE_URL}data/canton-water.geojson`, { signal: AbortSignal.timeout(25000) }),
   ]);
   if (!response.ok) throw new Error(`底图服务不可用（HTTP ${response.status}），请检查网络后重试。`);
   if (!buildingsResponse.ok) throw new Error(`建筑快照未能加载（HTTP ${buildingsResponse.status}），请重新加载。`);
-  if (bridgeResponse && !bridgeResponse.ok) throw new Error(`海心桥轮廓未能加载（HTTP ${bridgeResponse.status}），请重新加载。`);
-  if (crossingsResponse && !crossingsResponse.ok) throw new Error(`跨江桥面快照未能加载（HTTP ${crossingsResponse.status}），请重新加载。`);
-  if (riverResponse && !riverResponse.ok) throw new Error(`珠江中心线快照未能加载（HTTP ${riverResponse.status}），请重新加载。`);
-  if (streetsResponse && !streetsResponse.ok) throw new Error(`近场路网快照未能加载（HTTP ${streetsResponse.status}），请重新加载。`);
-  if (greensResponse && !greensResponse.ok) throw new Error(`近场绿地快照未能加载（HTTP ${greensResponse.status}），请重新加载。`);
-  if (blocksResponse && !blocksResponse.ok) throw new Error(`近场街坊面快照未能加载（HTTP ${blocksResponse.status}），请重新加载。`);
-  if (waterResponse && !waterResponse.ok) throw new Error(`近场水面快照未能加载（HTTP ${waterResponse.status}），请重新加载。`);
-  if (groundsResponse && !groundsResponse.ok) throw new Error(`校园与绿地未能加载（HTTP ${groundsResponse.status}），请重新加载。`);
-  if (roadsResponse && !roadsResponse.ok) throw new Error(`道路隔断快照未能加载（HTTP ${roadsResponse.status}），请重新加载。`);
+  if (!bridgeResponse.ok) throw new Error(`海心桥轮廓未能加载（HTTP ${bridgeResponse.status}），请重新加载。`);
+  if (!crossingsResponse.ok) throw new Error(`跨江桥面快照未能加载（HTTP ${crossingsResponse.status}），请重新加载。`);
+  if (!riverResponse.ok) throw new Error(`珠江中心线快照未能加载（HTTP ${riverResponse.status}），请重新加载。`);
+  if (!streetsResponse.ok) throw new Error(`近场路网快照未能加载（HTTP ${streetsResponse.status}），请重新加载。`);
+  if (!greensResponse.ok) throw new Error(`近场绿地快照未能加载（HTTP ${greensResponse.status}），请重新加载。`);
+  if (!blocksResponse.ok) throw new Error(`近场街坊面快照未能加载（HTTP ${blocksResponse.status}），请重新加载。`);
+  if (!waterResponse.ok) throw new Error(`近场水面快照未能加载（HTTP ${waterResponse.status}），请重新加载。`);
   const buildings = await buildingsResponse.json();
-  const bridge = bridgeResponse ? (await bridgeResponse.json()).features : [];
-  const crossings = crossingsResponse ? await crossingsResponse.json() : null;
-  const river = riverResponse ? (await riverResponse.json()).features : [];
-  const streets = streetsResponse ? (await streetsResponse.json()).features : [];
-  const greens = greensResponse ? (await greensResponse.json()).features : [];
-  const blocks = blocksResponse ? (await blocksResponse.json()).features : [];
-  const waterFaces = waterResponse ? (await waterResponse.json()).features : [];
-  const grounds = groundsResponse ? await groundsResponse.json() : null;
-  const roads = roadsResponse ? (await roadsResponse.json()).features : [];
-  const campusGeometry = grounds?.features.find(feature => feature.properties.kind === 'campus' && feature.properties.target)?.geometry ?? null;
+  const bridge = (await bridgeResponse.json()).features;
+  const crossings = await crossingsResponse.json();
+  const river = (await riverResponse.json()).features;
+  const streets = (await streetsResponse.json()).features;
+  const greens = (await greensResponse.json()).features;
+  const blocks = (await blocksResponse.json()).features;
+  const waterFaces = (await waterResponse.json()).features;
   const style = neighborhoodStyle(await response.json());
   const mobile = () => window.innerWidth <= 760;
   const landscape = () => window.matchMedia('(min-width: 568px) and (max-width: 1000px) and (max-height: 500px)').matches;
   let panelOpen = false;
   const padding = () => landscape()
-    ? { top: school && !panelOpen ? 194 : 180, left: 20, right: panelOpen ? 330 : school ? 300 : 20, bottom: 65 }
-    : mobile() ? { top: school && innerHeight <= 600 && !panelOpen ? 155 : 255, left: 15, right: 15, bottom: panelOpen ? Math.round(innerHeight * 0.38 + 129) : school ? 185 : 110 }
-      : school ? { top: 100, left: 230, right: panelOpen ? 360 : 40, bottom: 130 }
-        : { top: 200, left: 280, right: panelOpen ? 360 : 0, bottom: 60 };
+    ? { top: 180, left: 20, right: panelOpen ? 330 : 20, bottom: 65 }
+    : mobile() ? { top: 255, left: 15, right: 15, bottom: panelOpen ? Math.round(innerHeight * 0.38 + 129) : 110 }
+      : { top: 200, left: 280, right: panelOpen ? 360 : 0, bottom: 60 };
   function lensPadding() {
     const box = document.querySelector('.scene-key').getBoundingClientRect();
     if (!box.height) return padding();
@@ -143,18 +131,13 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   const heroCamera = () => ({ center, zoom: landscape() ? SCENE.camera.landscapeZoom : mobile() ? SCENE.camera.mobileZoom : SCENE.camera.zoom, pitch: SCENE.camera.pitch, bearing: SCENE.camera.bearing, padding: padding() });
   // Shared cameras use the map's pan limits; selectable buildings come only from the local snapshot.
   const shared = parseView(window.location.hash);
-  // V4-8 接力的下半场：从对面那页升起来换的页，开屏机位是中继那一格（正上方、零 padding），下面再降回默认机位。
-  // 深链优先——地址里带了 `#map=` 就照用户指的镜头开，不把这段降落插进去。
-  const relay = arrive && !shared.camera ? { ...arrive, padding: { top: 0, bottom: 0, left: 0, right: 0 } } : null;
   const map = new maplibregl.Map({
-    container: 'map', style, ...(relay ?? (shared.camera ? { ...shared.camera, padding: padding() } : heroCamera())),
+    container: 'map', style, ...(shared.camera ? { ...shared.camera, padding: padding() } : heroCamera()),
     maxPitch: VIEW_LIMITS.maxPitch, minZoom: VIEW_LIMITS.minZoom, maxZoom: VIEW_LIMITS.maxZoom,
     maxBounds: [[DEFAULT_CENTER.lng - VIEW_LIMITS.span, DEFAULT_CENTER.lat - VIEW_LIMITS.span], [DEFAULT_CENTER.lng + VIEW_LIMITS.span, DEFAULT_CENTER.lat + VIEW_LIMITS.span]],
     maxTileCacheSize: 100, attributionControl: { compact: true }, canvasContextAttributes: { antialias: true },
   });
-  // 中继那一格的取景框必须留着：这两行原本会把开屏那侧抹平的 padding 立刻加回来，圆盘就被顶到画面边上，
-  // 切页那一帧两边对不上。降回默认机位时 heroCamera() 自己会把 padding 带回来。
-  if (!relay) map.setPadding(padding());
+  map.setPadding(padding());
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 80, unit: 'metric' }), 'bottom-left');
   map.on('error', onError);
@@ -172,9 +155,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   let focus; // a block waiting for the camera and its tiles to settle before it can be picked
   let lastHash = window.location.hash;
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  // V4-8 接力的下半场：开屏开在中继那一格（街区是一枚 150 px 的圆盘），落页第一帧就把它降回默认机位。
-  // 降的终点就是 `heroCamera()`，所以"接力气球"放完之后画面与直接开页逐像素一致。
-  if (relay) map.flyTo({ ...heroCamera(), duration: reducedMotion.matches ? 0 : FLY_IN_MS, essential: true });
   // replaceState is rate limited by the browser and orbit rewrites it every frame, so the address bar only follows a
   // camera that actually stopped somewhere.
   function writeHash() {
@@ -184,7 +164,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     lastHash = hash;
     window.history.replaceState(null, '', hash);
   }
-  if (grounds) addGrounds(map, grounds);
   const circle = radiusPolygon(DEFAULT_CENTER, RADIUS_METERS);
   map.addSource('neighborhood-radius', { type: 'geojson', data: circle });
   map.addLayer({ id: 'radius-line', type: 'line', source: 'neighborhood-radius', paint: { 'line-color': '#52838a', 'line-width': 1.2, 'line-dasharray': [4, 4], 'line-opacity': 0.65 } });
@@ -193,14 +172,12 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     filter: ['all', ['!=', ['get', 'hide_3d'], true], ['>', distance, RADIUS_METERS]],
     paint: { 'fill-extrusion-color': contextAtmosphereColor(ATMOSPHERES.day, center), 'fill-extrusion-height': ['to-number', ['get', 'render_height'], DEFAULT_BUILDING_HEIGHT], 'fill-extrusion-base': ['to-number', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': 0.4, 'fill-extrusion-vertical-gradient': true },
   });
-  // The snapshot can carry outlines from a second, non-OSM source; the map's own attribution line has to say so.
-  const derivedOutlines = buildings.features.filter((feature) => feature.properties.footprintSource).length;
-  // Most of this scene's footprints carry no height at all and would all draw as the same flat 9.6 m slab, so each one
-  // gets an illustrative depth from its own outline. Tagged and level-derived heights are left untouched.
-  if (!school) buildings.features = schematicDisplayHeights(buildings.features, { center: DEFAULT_CENTER });
+  // 这一侧大部分轮廓根本没有高度，全画成同一块 9.6 m 平板就读不出街区的形状，所以按自己那条短边补一层示意厚度。
+  // 带标注的与按层数现算的高度一字不动。
+  buildings.features = schematicDisplayHeights(buildings.features, { center: DEFAULT_CENTER });
   map.addSource('canton-buildings', {
     type: 'geojson', data: buildings, maxzoom: 16, tolerance: 0.4,
-    attribution: `© OpenStreetMap contributors · 建筑${school ? '' : '与跨江桥'}快照 / ODbL${derivedOutlines ? ` · 另有 ${derivedOutlines} 个影像推导轮廓 / CC BY 4.0（2023）` : ''}`,
+    attribution: '© OpenStreetMap contributors · 建筑与跨江桥快照 / ODbL',
   });
   map.addLayer({ id: 'height-unknown', type: 'fill', source: 'canton-buildings', layout: { visibility: 'none' }, filter: lensFilter('all', 'estimate'), paint: { 'fill-color': UNKNOWN_HEIGHT_COLOR, 'fill-opacity': 0.65, 'fill-outline-color': '#66777c' } });
   const paint = {
@@ -210,12 +187,12 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     'fill-extrusion-height': ['coalesce', ['get', 'displayHeight'], ['get', 'height']], 'fill-extrusion-base': ['get', 'base'],
     'fill-extrusion-opacity': 1, 'fill-extrusion-vertical-gradient': true,
   };
-  const overviewFilter = school ? true : ['any', ['>=', ['get', 'height'], 25], ['>=', ['get', 'area'], 1200]];
+  const overviewFilter = ['any', ['>=', ['get', 'height'], 25], ['>=', ['get', 'area'], 1200]];
   // Two of the landmarks are tall enough that a box on their footprint reads as the wrong building, so they are lifted
   // out of every extrusion this scene draws and stood as shells in the tower's own layer instead. Negating `in` with
   // `!` rather than spelling it `!in`: the expression form is what the validator knows, and a filter it does not
   // recognise drops the whole layer as an `error` event - no throw, nothing in the console.
-  const formFilter = school ? true : ['!', ['in', ['get', 'osmId'], ['literal', FORM_OSM_IDS]]];
+  const formFilter = ['!', ['in', ['get', 'osmId'], ['literal', FORM_OSM_IDS]]];
   // The night lamps are four layers rather than one: two groups of blocks, split by their own OSM id, each cross-fading
   // between two picks of the same band's cells. The shipped pick keeps the layer this scene has always had - same id,
   // same tile family - so everything that reads `building-lights` still reads it. See LAMP_GROUPS in facade.js for why
@@ -254,47 +231,45 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // the style draws next, because a sheen laid over a bridge deck or a bank label is a painting error, not a texture.
   // The pristine tiles are kept because motion redraws the live one: every frame is scrolled from these pixels, never
   // from whatever the image currently holds, so a long-running loop cannot walk the crests out of their bands.
-  // 广场那四层在下面的 `!school` 分支里才切得出来，但植被与氛围切换都要读它，所以先占住这个名字。
+  // 广场那四层与水面那几层要一起进氛围切换，所以先占住这两个名字，真正的值在下面才建出来。
   let plaza = null;
-  // 广场地面那张不重复的米数贴图铺出来的网格，与广场同进同退：景泰没有广场，也就没有它。
+  // 广场地面那张不重复的米数贴图铺出来的网格，与广场同进同退。
   let plazaGround = null;
   let plazaSurfaceState = null;
   const riverTiles = {};
-  if (!school) {
-    for (const [id, options] of Object.entries(WATER_THEMES)) {
-      riverTiles[id] = waterTexture(options);
-      map.addImage(`${WATER_IMAGE_PREFIX}-${id}`, riverTiles[id]);
-    }
-    const water = style.layers.findIndex((layer) => layer.type === 'fill' && layer['source-layer'] === 'water');
-    map.addLayer({
-      id: 'river-surface', type: 'fill', source: 'openmaptiles', 'source-layer': 'water',
-      paint: {
-        'fill-pattern': `${WATER_IMAGE_PREFIX}-day`,
-        'fill-opacity': riverOpacityExpression(),
-      },
-    }, water < 0 ? undefined : style.layers[water + 1]?.id);
-    // Traffic light sits above every road the basemap draws and below the volumes, so a ribbon runs along the street
-    // rather than across the roofs. Both layers ship dark: the night theme is what turns them on.
-    const road = style.layers.reduce((last, layer, index) => (layer.type === 'line' && layer['source-layer'] === 'transportation' ? index : last), -1);
-    for (const layer of trafficLayers()) map.addLayer(layer, road < 0 ? undefined : style.layers[road + 1]?.id);
-    // The river crossings, as decks. They go in above the traffic ribbons and below the volumes, so a bridge carries
-    // the road it is the road over, and an office tower two hundred metres nearer still stands in front of it.
-    // No attribution of its own: the credit is OSM and ODbL, which the buildings source line already carries, and a
-    // second clause there pushed the collapsed credits tall enough to sit under the phone sheet.
-    map.addSource(BRIDGE_SOURCE, { type: 'geojson', data: crossings, maxzoom: 16, tolerance: 0.4 });
-    for (const layer of bridgeLayers(ATMOSPHERES.day)) map.addLayer(layer, 'neighborhood-buildings');
-    // 花城广场的中轴。四层都从实测面来（草坪、水面、`pedestrian` 硬质面），只有步行带是沿实测线扫出来的，
-    // 宽度是画的常数。它排在桥面之后、体块之前：广场是地面，桥跨在它北边的水上，楼站在它上面。
-    plaza = carvePlaza({ greens, water: waterFaces, blocks, streets });
-    map.addSource(PLAZA_SOURCE, { type: 'geojson', data: featureCollection(plaza.features), maxzoom: 17, tolerance: 0.25 });
-    for (const layer of plazaLayers(ATMOSPHERES.day)) map.addLayer(layer, 'neighborhood-buildings');
-    // 四层是颜色，这一格是"建出来的边"：石材的分格缝、草坪与石板之间那道收边、快绿湖的水线，全按广场自己的米数
-    // 画在一张不重复的乘性贴图上，乘在四层之上。它站在塔的米制坐标里，所以走的是同一块 three.js 场景。
-    if (plaza.ring) {
-      const surface = plazaSurface({ ring: plaza.ring, features: plaza.features, origin: DEFAULT_CENTER });
-      plazaGround = plazaSurfaceMesh(surface);
-      plazaSurfaceState = { wide: surface.wide, tall: surface.tall, counts: surface.counts, metres: surface.metres };
-    }
+  for (const [id, options] of Object.entries(WATER_THEMES)) {
+    riverTiles[id] = waterTexture(options);
+    map.addImage(`${WATER_IMAGE_PREFIX}-${id}`, riverTiles[id]);
+  }
+  const water = style.layers.findIndex((layer) => layer.type === 'fill' && layer['source-layer'] === 'water');
+  map.addLayer({
+    id: 'river-surface', type: 'fill', source: 'openmaptiles', 'source-layer': 'water',
+    paint: {
+      'fill-pattern': `${WATER_IMAGE_PREFIX}-day`,
+      'fill-opacity': riverOpacityExpression(),
+    },
+  }, water < 0 ? undefined : style.layers[water + 1]?.id);
+  // Traffic light sits above every road the basemap draws and below the volumes, so a ribbon runs along the street
+  // rather than across the roofs. Both layers ship dark: the night theme is what turns them on.
+  const road = style.layers.reduce((last, layer, index) => (layer.type === 'line' && layer['source-layer'] === 'transportation' ? index : last), -1);
+  for (const layer of trafficLayers()) map.addLayer(layer, road < 0 ? undefined : style.layers[road + 1]?.id);
+  // The river crossings, as decks. They go in above the traffic ribbons and below the volumes, so a bridge carries
+  // the road it is the road over, and an office tower two hundred metres nearer still stands in front of it.
+  // No attribution of its own: the credit is OSM and ODbL, which the buildings source line already carries, and a
+  // second clause there pushed the collapsed credits tall enough to sit under the phone sheet.
+  map.addSource(BRIDGE_SOURCE, { type: 'geojson', data: crossings, maxzoom: 16, tolerance: 0.4 });
+  for (const layer of bridgeLayers(ATMOSPHERES.day)) map.addLayer(layer, 'neighborhood-buildings');
+  // 花城广场的中轴。四层都从实测面来（草坪、水面、`pedestrian` 硬质面），只有步行带是沿实测线扫出来的，
+  // 宽度是画的常数。它排在桥面之后、体块之前：广场是地面，桥跨在它北边的水上，楼站在它上面。
+  plaza = carvePlaza({ greens, water: waterFaces, blocks, streets });
+  map.addSource(PLAZA_SOURCE, { type: 'geojson', data: featureCollection(plaza.features), maxzoom: 17, tolerance: 0.25 });
+  for (const layer of plazaLayers(ATMOSPHERES.day)) map.addLayer(layer, 'neighborhood-buildings');
+  // 四层是颜色，这一格是"建出来的边"：石材的分格缝、草坪与石板之间那道收边、快绿湖的水线，全按广场自己的米数
+  // 画在一张不重复的乘性贴图上，乘在四层之上。它站在塔的米制坐标里，所以走的是同一块 three.js 场景。
+  if (plaza.ring) {
+    const surface = plazaSurface({ ring: plaza.ring, features: plaza.features, origin: DEFAULT_CENTER });
+    plazaGround = plazaSurfaceMesh(surface);
+    plazaSurfaceState = { wide: surface.wide, tall: surface.tall, counts: surface.counts, metres: surface.metres };
   }
   // The pattern shader ignores `fill-extrusion-color`, so the window grid is a coplanar translucent overlay rather than a
   // paint on the coloured volumes: it passes the depth test those walls already write, and the category colour and the
@@ -302,134 +277,122 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // never hangs in the air over a block the current lens hides, and it stays off in the height lens, where the colour is
   // the data. The grid is procedural and no band is finer than the ~7 m the hero camera can still resolve, so it reads as
   // facade rhythm, never as real floors; which rhythm a block wears is read from its own `category`.
-  if (!school) {
-    // One transparent tile for the blocks the id dice left dark, shared by both window layers and by the night grid as
-    // well: a building that burns nothing cannot keep the grid's own 16 % of lit panes either.
-    map.addImage(WINDOWS_OFF_IMAGE, windowsOffTile());
-    for (const atmosphere of Object.keys(FACADE_THEMES)) for (const shape of Object.keys(FACADE_SHAPES)) {
-      map.addImage(facadeImage(atmosphere, shape), facadeTexture(facadeOptions(atmosphere, shape)));
-    }
-    map.addLayer({
-      id: 'building-facade', type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14, filter: formFilter,
-      paint: {
-        'fill-extrusion-pattern': facadePattern('day'),
-        'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.42, 16.5, 0.6, 18, 0.72],
-        'fill-extrusion-height': ['coalesce', ['get', 'displayHeight'], ['get', 'height']],
-        'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': true,
-      },
-    }, 'height-estimates');
-    // Night lamps are coplanar overlays rather than a brighter colour in the grid above: an overlay can be almost opaque
-    // where a window is and still leave the rest of the wall transparent, so the category colour and the distance fade of
-    // the layer underneath keep coming through. How many windows a block lights is read from its own displayed height,
-    // what colour they burn from its own OSM id and how brightly from its own distance, so no lamp is hand-placed and a
-    // reload cannot reshuffle the skyline.
-    // `fill-extrusion-vertical-gradient` stays off so a ground-floor window is not darker than a top-floor one, and the
-    // pattern necessarily paints the top face too, so a low block shows lamps on its roof as well - accepted rather than
-    // hidden, since masking the roof would mean drawing a second geometry. Turned on by the night atmosphere only, and it
-    // shadows `building-facade`'s filter so a lamp never hangs in the air over a block the current lens hides.
-    const wallHeight = ['coalesce', ['get', 'displayHeight'], ['get', 'height']];
-    // The band is stepped on the same expression the extrusion height uses, so a block can never be drawn at one height
-    // and dressed for another. Band x temperature x ring names one tile, i.e. twenty-seven per family.
-    const lampBand = lampBandExpression(wallHeight);
-    // Distance is a tile axis rather than an opacity one because `fill-extrusion-opacity` is not data-driven: the moment
-    // MapLibre's style validator sees `['get', ...]` in it, the whole layer is dropped - as an `error` event, not a
-    // throw, so the map simply renders without lamps. Without the ring a block 2.9 km away burns as brightly as one 300 m
-    // off, and 1,441 of the 1,816 blocks on screen at the hero camera are past 1.5 km, which is most of what made the
-    // first night frame read as an even sprinkle instead of a skyline with depth.
-    const lampRing = ['step', ['get', 'distance'], 0, ...LIGHT_FADES.slice(0, -1).flatMap((ring, index) => [ring.below, index + 1])];
-    // The colour temperature is dealt out by the block's own id too, but no longer three ways: `osmId % 3` gave a third
-    // of the city the blue-white of an office slab, which is the "全白" the brief is about. Ten buckets, four amber, four
-    // warm white, two cool - 80% warm, 20% cool - and the dark slice below is dealt from a *different* modulus, so
-    // switching buildings off cannot thin the colour distribution with it.
-    const lampTemperature = lampTemperatureDeal();
-    const lampDark = lampDarkness();
-    const lampTile = (prefix) => ['concat', prefix, '-', lampBand, '-', lampTemperature, '-', lampRing];    // The pane pitch is a tile axis as well: the shipped grid is 7.3 m per cell because that is the finest pitch the
-    // hero camera (zoom 15.5 / pitch 62, ~1.6 m per screen pixel on a wall face) still resolves as a window, and V7
-    // asks for half of it. Halving it everywhere put the hero camera's windows below that floor - measured 154 lit
-    // pixels against 641 on the same wall - so the 3.7 m grid is a second family that takes over where it resolves.
-    // `['zoom']` stays the outermost input of the top-level step: nested, the whole property is silently refused.
-    // `dark` is the set of blocks that gets no tile at all: the 1/11 that burns nothing, plus - on the alternate pick
-    // only - the 1/17 that breathes a whole facade instead of a cell or two.
-    const lampImage = (prefix, nearPrefix, dark = lampDark) => ['step', ['zoom'],
-      ['case', dark, WINDOWS_OFF_IMAGE, lampTile(prefix)], LIGHT_NEAR_ZOOM,
-      ['case', dark, WINDOWS_OFF_IMAGE, lampTile(nearPrefix)]];
-    // The weight of one group's shipped pick, and of the alternate pick it cross-fades against. `['zoom']` has to stay
-    // the input of the outermost interpolate - nested inside a `['*']` the whole property is silently refused - so the
-    // global state rides inside each stop, which is also how the day/sunset/night blend walks these same numbers.
-    const lampWeight = (group) => ['global-state', LAMP_KEYS[group]];
-    const lampAlpha = (layer) => layer.pick === 0
-      ? lampWeight(layer.group) : ['-', 1, lampWeight(layer.group)];
-    const lampOpacity = (layer) => ['interpolate', ['linear'], ['zoom'],
-      14, 0, 15, ['*', 0.62, lampAlpha(layer)], 16.5, ['*', 0.72, lampAlpha(layer)], 18, ['*', 0.8, lampAlpha(layer)]];
-    // The spill's own ramp. `weight` is null for the majority, whose halo is spill and not a window and so never moves;
-    // the breathing minority gets its group's weight, so the wash on its wall goes out with the windows that made it
-    // instead of floating on a dark building. At weight 1 the multiplier is exactly 1 - the shipped frame is unchanged.
-    const glowOpacity = (weight) => ['interpolate', ['linear'], ['zoom'], 14, 0,
-      15, weight ? ['*', 0.44, weight] : 0.44,
-      16.5, weight ? ['*', 0.56, weight] : 0.56,
-      18, weight ? ['*', 0.66, weight] : 0.66];
-    for (let band = 0; band < LIGHT_BANDS.length; band++) {
-      for (let temperature = 0; temperature < LIGHT_TEMPERATURES.length; temperature++) {
-        for (let ring = 0; ring < LIGHT_FADES.length; ring++) {
-          map.addImage(`${LIGHT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring));
-          map.addImage(`${LAMP_ALT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 1));
-          map.addImage(`${GLOW_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, glowTexture(band, temperature, ring));
-          map.addImage(`${LIGHT_NEAR_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 0, true));
-          map.addImage(`${LAMP_NEAR_ALT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 1, true));
-          map.addImage(`${GLOW_NEAR_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, glowTexture(band, temperature, ring, true));
-        }
+  // One transparent tile for the blocks the id dice left dark, shared by both window layers and by the night grid as
+  // well: a building that burns nothing cannot keep the grid's own 16 % of lit panes either.
+  map.addImage(WINDOWS_OFF_IMAGE, windowsOffTile());
+  for (const atmosphere of Object.keys(FACADE_THEMES)) for (const shape of Object.keys(FACADE_SHAPES)) {
+    map.addImage(facadeImage(atmosphere, shape), facadeTexture(facadeOptions(atmosphere, shape)));
+  }
+  map.addLayer({
+    id: 'building-facade', type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14, filter: formFilter,
+    paint: {
+      'fill-extrusion-pattern': facadePattern('day'),
+      'fill-extrusion-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 15, 0.42, 16.5, 0.6, 18, 0.72],
+      'fill-extrusion-height': ['coalesce', ['get', 'displayHeight'], ['get', 'height']],
+      'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': true,
+    },
+  }, 'height-estimates');
+  // Night lamps are coplanar overlays rather than a brighter colour in the grid above: an overlay can be almost opaque
+  // where a window is and still leave the rest of the wall transparent, so the category colour and the distance fade of
+  // the layer underneath keep coming through. How many windows a block lights is read from its own displayed height,
+  // what colour they burn from its own OSM id and how brightly from its own distance, so no lamp is hand-placed and a
+  // reload cannot reshuffle the skyline.
+  // `fill-extrusion-vertical-gradient` stays off so a ground-floor window is not darker than a top-floor one, and the
+  // pattern necessarily paints the top face too, so a low block shows lamps on its roof as well - accepted rather than
+  // hidden, since masking the roof would mean drawing a second geometry. Turned on by the night atmosphere only, and it
+  // shadows `building-facade`'s filter so a lamp never hangs in the air over a block the current lens hides.
+  const wallHeight = ['coalesce', ['get', 'displayHeight'], ['get', 'height']];
+  // The band is stepped on the same expression the extrusion height uses, so a block can never be drawn at one height
+  // and dressed for another. Band x temperature x ring names one tile, i.e. twenty-seven per family.
+  const lampBand = lampBandExpression(wallHeight);
+  // Distance is a tile axis rather than an opacity one because `fill-extrusion-opacity` is not data-driven: the moment
+  // MapLibre's style validator sees `['get', ...]` in it, the whole layer is dropped - as an `error` event, not a
+  // throw, so the map simply renders without lamps. Without the ring a block 2.9 km away burns as brightly as one 300 m
+  // off, and 1,441 of the 1,816 blocks on screen at the hero camera are past 1.5 km, which is most of what made the
+  // first night frame read as an even sprinkle instead of a skyline with depth.
+  const lampRing = ['step', ['get', 'distance'], 0, ...LIGHT_FADES.slice(0, -1).flatMap((ring, index) => [ring.below, index + 1])];
+  // The colour temperature is dealt out by the block's own id too, but no longer three ways: `osmId % 3` gave a third
+  // of the city the blue-white of an office slab, which is the "全白" the brief is about. Ten buckets, four amber, four
+  // warm white, two cool - 80% warm, 20% cool - and the dark slice below is dealt from a *different* modulus, so
+  // switching buildings off cannot thin the colour distribution with it.
+  const lampTemperature = lampTemperatureDeal();
+  const lampDark = lampDarkness();
+  const lampTile = (prefix) => ['concat', prefix, '-', lampBand, '-', lampTemperature, '-', lampRing];    // The pane pitch is a tile axis as well: the shipped grid is 7.3 m per cell because that is the finest pitch the
+  // hero camera (zoom 15.5 / pitch 62, ~1.6 m per screen pixel on a wall face) still resolves as a window, and V7
+  // asks for half of it. Halving it everywhere put the hero camera's windows below that floor - measured 154 lit
+  // pixels against 641 on the same wall - so the 3.7 m grid is a second family that takes over where it resolves.
+  // `['zoom']` stays the outermost input of the top-level step: nested, the whole property is silently refused.
+  // `dark` is the set of blocks that gets no tile at all: the 1/11 that burns nothing, plus - on the alternate pick
+  // only - the 1/17 that breathes a whole facade instead of a cell or two.
+  const lampImage = (prefix, nearPrefix, dark = lampDark) => ['step', ['zoom'],
+    ['case', dark, WINDOWS_OFF_IMAGE, lampTile(prefix)], LIGHT_NEAR_ZOOM,
+    ['case', dark, WINDOWS_OFF_IMAGE, lampTile(nearPrefix)]];
+  // 本组那一枚出厂档的表达式写法（注意它与 `src/facade.js` 那个算数值的 `lampWeight` 同名不同物，这里叫
+  // `lampState`）。`['zoom']` has to stay
+  // the input of the outermost interpolate - nested inside a `['*']` the whole property is silently refused - so the
+  // global state rides inside each stop, which is also how the day/sunset/night blend walks these same numbers.
+  const lampState = (group) => ['global-state', LAMP_KEYS[group]];
+  const lampAlpha = (layer) => layer.pick === 0
+    ? lampState(layer.group) : ['-', 1, lampState(layer.group)];
+  const lampOpacity = (layer) => ['interpolate', ['linear'], ['zoom'],
+    14, 0, 15, ['*', 0.62, lampAlpha(layer)], 16.5, ['*', 0.72, lampAlpha(layer)], 18, ['*', 0.8, lampAlpha(layer)]];
+  // The spill's own ramp. `weight` is null for the majority, whose halo is spill and not a window and so never moves;
+  // the breathing minority gets its group's weight, so the wash on its wall goes out with the windows that made it
+  // instead of floating on a dark building. At weight 1 the multiplier is exactly 1 - the shipped frame is unchanged.
+  const glowOpacity = (weight) => ['interpolate', ['linear'], ['zoom'], 14, 0,
+    15, weight ? ['*', 0.44, weight] : 0.44,
+    16.5, weight ? ['*', 0.56, weight] : 0.56,
+    18, weight ? ['*', 0.66, weight] : 0.66];
+  for (let band = 0; band < LIGHT_BANDS.length; band++) {
+    for (let temperature = 0; temperature < LIGHT_TEMPERATURES.length; temperature++) {
+      for (let ring = 0; ring < LIGHT_FADES.length; ring++) {
+        map.addImage(`${LIGHT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring));
+        map.addImage(`${LAMP_ALT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 1));
+        map.addImage(`${GLOW_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, glowTexture(band, temperature, ring));
+        map.addImage(`${LIGHT_NEAR_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 0, true));
+        map.addImage(`${LAMP_NEAR_ALT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 1, true));
+        map.addImage(`${GLOW_NEAR_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, glowTexture(band, temperature, ring, true));
       }
     }
-    for (const layer of lampLayers) {
-      map.addLayer({
-        id: layer.id, type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14, filter: lampFilter(layer, formFilter),
-        layout: { visibility: 'none' },
-        paint: {
-          // On the alternate hand, the breathing minority is handed the all-dark tile: as its group's weight walks from
-          // 1 to 0 the whole facade goes out with it, while every other block just turns a cell or two over. Opacity
-          // cannot carry that per-block rule - `['get']` in `fill-extrusion-opacity` drops the layer - so the dice is
-          // read here, where a data-driven pattern is what the layer already runs on.
-          'fill-extrusion-pattern': lampImage(layer.pick ? LAMP_ALT_IMAGE_PREFIX : LIGHT_IMAGE_PREFIX,
-            layer.pick ? LAMP_NEAR_ALT_IMAGE_PREFIX : LIGHT_NEAR_IMAGE_PREFIX,
-            layer.pick ? ['any', lampDark, lampBreath] : lampDark),
-          'fill-extrusion-opacity': lampOpacity(layer),
-          'fill-extrusion-height': wallHeight,
-          'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': false,
-        },
-      }, 'height-estimates');
-    }
-    // Spill goes under the lamps it belongs to: the hard-edged tile draws over its own halo, so a window keeps an edge
-    // while the wall around it picks up the light. Same geometry, same band, same gates - and it has to be inserted by
-    // id, since the lamps already exist at this point. It stays on the shipped pick: a halo is spill, not a window, and
-    // the two picks' halos differ only in which cells they smear. The breathing minority is the exception, and it is
-    // its own two layers rather than a per-block opacity (which `fill-extrusion-opacity` cannot carry): a building
-    // whose windows are going out cannot keep the wash they cast.
-    let under = lampLayers[0].id;
-    for (const layer of glowLayers) {
-      map.addLayer({
-        id: layer.id, type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14,
-        filter: lampFilter(layer, formFilter),
-        layout: { visibility: 'none' },
-        paint: {
-          'fill-extrusion-pattern': lampImage(GLOW_IMAGE_PREFIX, GLOW_NEAR_IMAGE_PREFIX),
-          'fill-extrusion-opacity': glowOpacity(layer.group === null ? null : lampWeight(layer.group)),
-          'fill-extrusion-height': wallHeight,
-          'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': false,
-        },
-      }, under);
-      under = layer.id;
-    }
   }
-  if (school) {
-    map.addSource('school-building-groups', { type: 'geojson', data: featureCollection(), maxzoom: 16, tolerance: 0.4 });
-    map.addLayer({ id: 'school-building-contact', type: 'line', source: 'school-building-groups', layout: { 'line-join': 'round' }, paint: {
-      'line-color': ATMOSPHERES.day.maquette.contact, 'line-blur': 1.4,
-      'line-width': ['interpolate', ['linear'], ['zoom'], 13, 0.6, 16, 2, 18, 3.2],
-      'line-opacity': ['interpolate', ['linear'], ['get', 'distance'], 0, 0.28, 450, 0.28, RADIUS_METERS, 0.05],
-    } });
-    map.addLayer({ id: 'school-building-groups', type: 'fill-extrusion', source: 'school-building-groups', paint: { ...paint,
-      'fill-extrusion-height': ['get', 'displayHeight'], 'fill-extrusion-color': buildingAtmosphereColor(ATMOSPHERES.day, 450) } });
-    for (const layer of ['neighborhood-buildings', 'neighborhood-buildings-overview']) map.setLayoutProperty(layer, 'visibility', 'none');
+  for (const layer of lampLayers) {
+    map.addLayer({
+      id: layer.id, type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14, filter: lampFilter(layer, formFilter),
+      layout: { visibility: 'none' },
+      paint: {
+        // On the alternate hand, the breathing minority is handed the all-dark tile: as its group's weight walks from
+        // 1 to 0 the whole facade goes out with it, while every other block just turns a cell or two over. Opacity
+        // cannot carry that per-block rule - `['get']` in `fill-extrusion-opacity` drops the layer - so the dice is
+        // read here, where a data-driven pattern is what the layer already runs on.
+        'fill-extrusion-pattern': lampImage(layer.pick ? LAMP_ALT_IMAGE_PREFIX : LIGHT_IMAGE_PREFIX,
+          layer.pick ? LAMP_NEAR_ALT_IMAGE_PREFIX : LIGHT_NEAR_IMAGE_PREFIX,
+          layer.pick ? ['any', lampDark, lampBreath] : lampDark),
+        'fill-extrusion-opacity': lampOpacity(layer),
+        'fill-extrusion-height': wallHeight,
+        'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': false,
+      },
+    }, 'height-estimates');
+  }
+  // Spill goes under the lamps it belongs to: the hard-edged tile draws over its own halo, so a window keeps an edge
+  // while the wall around it picks up the light. Same geometry, same band, same gates - and it has to be inserted by
+  // id, since the lamps already exist at this point. It stays on the shipped pick: a halo is spill, not a window, and
+  // the two picks' halos differ only in which cells they smear. The breathing minority is the exception, and it is
+  // its own two layers rather than a per-block opacity (which `fill-extrusion-opacity` cannot carry): a building
+  // whose windows are going out cannot keep the wash they cast.
+  let under = lampLayers[0].id;
+  for (const layer of glowLayers) {
+    map.addLayer({
+      id: layer.id, type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14,
+      filter: lampFilter(layer, formFilter),
+      layout: { visibility: 'none' },
+      paint: {
+        'fill-extrusion-pattern': lampImage(GLOW_IMAGE_PREFIX, GLOW_NEAR_IMAGE_PREFIX),
+        'fill-extrusion-opacity': glowOpacity(layer.group === null ? null : lampState(layer.group)),
+        'fill-extrusion-height': wallHeight,
+        'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': false,
+      },
+    }, under);
+    under = layer.id;
   }
   applyLight();
   map.setSky({ ...ATMOSPHERES.day.sky, ...SKY_BLEND });
@@ -444,60 +407,53 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // shipped pick full and its alternate pick at none - the same pair of numbers a page with no motion at all draws.
   map.setGlobalStateProperty(LAMP_KEYS[0], 1);
   map.setGlobalStateProperty(LAMP_KEYS[1], 1);
-  const landmarkForms = school ? null
-    : createLandmarkForms({ features: [...buildings.features, ...bridge], origin: DEFAULT_CENTER });
+  const landmarkForms = createLandmarkForms({ features: [...buildings.features, ...bridge], origin: DEFAULT_CENTER });
   // The near-field traffic needs the street snapshot before the scene can be dressed, and it joins the tower's scene
   // rather than the style: a car sits at a height in metres above a road in metres, which is the frame this layer owns
   // and not the one a paint property can reach.
   // 车的高度还有一项来自桥：`crossings` 里那些 `part === 'deck'` 的件就是上面那两层挤出体的顶，
   // 挂在同一条 way 上的车要站到它上面去，否则画面里就是"桥在江上、车在江里"。
   // 江上的船与车流是同一类客人，所以和引擎那侧共用 `createNearField` 一份装配：这里只交代"哪几份快照喂进来的"。
-  const nearField = school ? null : createNearField({
+  const nearField = createNearField({
     streets, river, shore: waterFaces, origin: DEFAULT_CENTER,
-    sprite: trafficSprite(), decks: deckHeights(crossings?.features ?? []),
+    sprite: trafficSprite(), decks: deckHeights(crossings.features),
   });
   // 树站在车流旁边：同一份路网、同一个一公里、同一套米制坐标，所以它也跟着塔那层一起画。
   // 石材面（含扫出来的步行带）是"这里不该有树"的名单——一棵榕树长在石板中轴上是错的。
   // 水面与楼块是同一张名单的第二批：用户 2026-10-09 的截图里树在江里成排、在屋顶上冒尖，就是这两格没让位。
-  const greenery = school ? null : createVegetation({
+  const greenery = createVegetation({
     streets, greens, origin: DEFAULT_CENTER, radius: VEGETATION_RADIUS,
     avoid: stoneRings(plaza), water: waterFaces, buildings: buildings.features,
   });
-  // 楼根那一圈接地带：轮廓是实测的（OSM + 影像轮廓那份晋升后的快照），宽度与深浅是画的。
+  // 楼根那一圈接地带：轮廓是实测的（OSM 那份晋升后的快照），宽度与深浅是画的。
   // 它跟着楼走：透视镜一开、或按类别筛的时候一起没——合并成一份几何就没有"逐栋筛"这一说，
   // 这是这一块的边界，写在 `shadow-pads.js` 的注释里，也记在 README。
-  const bases = school ? null : createBaseBands({ features: buildings.features, origin: DEFAULT_CENTER });
-  const towerLayer = school ? null : createTowerLayer(landmarkForms, nearField, river, greenery, plazaGround, bases);
+  const bases = createBaseBands({ features: buildings.features, origin: DEFAULT_CENTER });
+  const towerLayer = createTowerLayer(landmarkForms, nearField, river, greenery, plazaGround, bases);
   const towerHeight = 450;
-  if (towerLayer) {
-    map.addLayer(towerLayer);
-    map.addSource('canton-tower', { type: 'geojson', data: `${import.meta.env.BASE_URL}data/canton-tower.geojson` });
-    map.addLayer({ id: 'canton-tower-hit', type: 'fill-extrusion', source: 'canton-tower', paint: { 'fill-extrusion-color': '#ffffff', 'fill-extrusion-height': towerHeight, 'fill-extrusion-base': 0, 'fill-extrusion-opacity': 0 } });
-    // The two shells are not clickable - a custom layer has no features to hit - and their extrusions are filtered out
-    // wherever a shell stands, so the footprint goes back in as an invisible box at the same measured height. It is the
-    // snapshot's own feature, properties and all, which is what keeps the card, the deep link and the 600 m claim
-    // reading from the same record the box used to.
-    map.addSource('landmark-forms-hit', { type: 'geojson', data: featureCollection(landmarkForms.forms.filter((form) => form.hit).map((form) => form.feature)) });
-    map.addLayer({
-      id: 'landmark-forms-hit', type: 'fill-extrusion', source: 'landmark-forms-hit',
-      paint: {
-        'fill-extrusion-color': '#ffffff', 'fill-extrusion-height': ['coalesce', ['get', 'displayHeight'], ['get', 'height']],
-        'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': 0,
-      },
-    });
-  }
-  map.addSource('building-selection', { type: 'geojson', data: featureCollection(), ...(school ? { maxzoom: 16, tolerance: 0.4 } : {}) });
+  map.addLayer(towerLayer);
+  map.addSource('canton-tower', { type: 'geojson', data: `${import.meta.env.BASE_URL}data/canton-tower.geojson` });
+  map.addLayer({ id: 'canton-tower-hit', type: 'fill-extrusion', source: 'canton-tower', paint: { 'fill-extrusion-color': '#ffffff', 'fill-extrusion-height': towerHeight, 'fill-extrusion-base': 0, 'fill-extrusion-opacity': 0 } });
+  // The two shells are not clickable - a custom layer has no features to hit - and their extrusions are filtered out
+  // wherever a shell stands, so the footprint goes back in as an invisible box at the same measured height. It is the
+  // snapshot's own feature, properties and all, which is what keeps the card, the deep link and the 600 m claim
+  // reading from the same record the box used to.
+  map.addSource('landmark-forms-hit', { type: 'geojson', data: featureCollection(landmarkForms.forms.filter((form) => form.hit).map((form) => form.feature)) });
+  map.addLayer({
+    id: 'landmark-forms-hit', type: 'fill-extrusion', source: 'landmark-forms-hit',
+    paint: {
+      'fill-extrusion-color': '#ffffff', 'fill-extrusion-height': ['coalesce', ['get', 'displayHeight'], ['get', 'height']],
+      'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-opacity': 0,
+    },
+  });
+  map.addSource('building-selection', { type: 'geojson', data: featureCollection() });
   map.addLayer({
     id: 'building-selection', type: 'fill-extrusion', source: 'building-selection',
     paint: { 'fill-extrusion-color': '#1f4e5f', 'fill-extrusion-height': ['to-number', ['get', 'height'], 0], 'fill-extrusion-base': ['to-number', ['get', 'base'], 0], 'fill-extrusion-opacity': 0.35 },
   });
   map.addLayer({ id: 'building-selection-flat', type: 'fill', source: 'building-selection', filter: ['==', ['get', 'height'], 0], paint: { 'fill-color': ATMOSPHERES.day.selection, 'fill-opacity': 0.5 } });
   map.addSource('tower-label', { type: 'geojson', data: featureCollection([{ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: center } }]) });
-  map.addLayer({ id: 'tower-label', type: 'symbol', source: 'tower-label', layout: { 'text-field': SCENE.name, 'text-font': ['Noto Sans Regular'], 'text-size': school ? 13 : 12, 'text-offset': school ? [0, -1.2] : [2, 0], 'text-anchor': school ? 'bottom' : 'left', 'text-allow-overlap': true }, paint: { 'text-color': '#365f66', 'text-halo-color': '#f5f8f2', 'text-halo-width': 2 } });
-  if (school) {
-    map.addSource('walking-route', { type: 'geojson', data: featureCollection() });
-    map.addLayer({ id: 'walking-route', type: 'line', source: 'walking-route', paint: { 'line-color': '#487586', 'line-width': 3, 'line-dasharray': [2, 1] } });
-  }
+  map.addLayer({ id: 'tower-label', type: 'symbol', source: 'tower-label', layout: { 'text-field': SCENE.name, 'text-font': ['Noto Sans Regular'], 'text-size': 12, 'text-offset': [2, 0], 'text-anchor': 'left', 'text-allow-overlap': true }, paint: { 'text-color': '#365f66', 'text-halo-color': '#f5f8f2', 'text-halo-width': 2 } });
   for (const [key, category] of Object.entries(POI_CATEGORIES)) map.addImage(`poi-${key}`, await mapIcon(category), { pixelRatio: 2 });
   map.addSource('neighborhood-pois', { type: 'geojson', data: featureCollection() });
   map.addLayer({
@@ -518,38 +474,30 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     const shown = heights ? filter : ['all', filter, formFilter];
     map.setFilter('neighborhood-buildings', heights ? tagged : shown);
     map.setFilter('neighborhood-buildings-overview', heights ? tagged : ['all', shown, overviewFilter]);
-    if (!school) {
-      towerLayer?.showForms(!heights);
-      map.setFilter('building-facade', heights ? tagged : shown);
-      map.setLayoutProperty('building-facade', 'visibility', heights ? 'none' : 'visible');
-      // The lamps and their spill follow the same filter, and they only burn at night.
-      for (const layer of lampGates) {
-        map.setFilter(layer.id, lampFilter(layer, heights ? tagged : shown));
-        map.setLayoutProperty(layer.id, 'visibility', heights || atmosphereId !== 'night' ? 'none' : 'visible');
-      }
-      // The traffic follows the same rule as the lamps, and has to be re-decided here too: an atmosphere switch
-      // re-runs this through `swapArt`, but moving to the height lens does not, and a lens change is the one case
-      // where the theme stays put while the view it is drawn in changes.
-      lightTraffic(!heights && atmosphereId === 'night');
-      towerLayer?.setTraffic(!heights);
-      towerLayer?.setVegetation(!heights);
-      towerLayer?.setGround(!heights);
-      // 楼根那圈接地带是楼的附属物：透视镜把它连同拉伸体一起收走。按类别筛的时候也必须一起没——
-      // 它是一份合并几何，没有"逐栋跟着筛"这一说，留着就会变成"只剩一类楼，可每栋底下都有一片影"。
-      towerLayer?.setBases(!heights && lens.category === 'all');
+    towerLayer?.showForms(!heights);
+    map.setFilter('building-facade', heights ? tagged : shown);
+    map.setLayoutProperty('building-facade', 'visibility', heights ? 'none' : 'visible');
+    // The lamps and their spill follow the same filter, and they only burn at night.
+    for (const layer of lampGates) {
+      map.setFilter(layer.id, lampFilter(layer, heights ? tagged : shown));
+      map.setLayoutProperty(layer.id, 'visibility', heights || atmosphereId !== 'night' ? 'none' : 'visible');
     }
+    // The traffic follows the same rule as the lamps, and has to be re-decided here too: an atmosphere switch
+    // re-runs this through `swapArt`, but moving to the height lens does not, and a lens change is the one case
+    // where the theme stays put while the view it is drawn in changes.
+    lightTraffic(!heights && atmosphereId === 'night');
+    towerLayer?.setTraffic(!heights);
+    towerLayer?.setVegetation(!heights);
+    towerLayer?.setGround(!heights);
+    // 楼根那圈接地带是楼的附属物：透视镜把它连同拉伸体一起收走。按类别筛的时候也必须一起没——
+    // 它是一份合并几何，没有"逐栋跟着筛"这一说，留着就会变成"只剩一类楼，可每栋底下都有一片影"。
+    towerLayer?.setBases(!heights && lens.category === 'all');
     for (const [layer, source] of [['height-estimates', 'levels'], ['height-unknown', 'estimate']]) {
       map.setFilter(layer, ['all', filter, ['==', ['get', 'heightSource'], source]]);
       map.setLayoutProperty(layer, 'visibility', heights ? 'visible' : 'none');
     }
     for (const layer of ['neighborhood-buildings', 'neighborhood-buildings-overview']) map.setPaintProperty(layer, 'fill-extrusion-color', heights ? heightColor() : buildingAtmosphereColor(ATMOSPHERES[atmosphereId]));
     map.setLayoutProperty('context-buildings', 'visibility', heights || lens.category !== 'all' ? 'none' : 'visible');
-    if (school) {
-      if (!heights) map.getSource('school-building-groups').setData(featureCollection(displayForLens().features));
-      for (const layer of ['school-building-groups', 'school-building-contact']) map.setLayoutProperty(layer, 'visibility', heights ? 'none' : 'visible');
-      for (const layer of ['neighborhood-buildings', 'neighborhood-buildings-overview']) map.setLayoutProperty(layer, 'visibility', heights ? 'visible' : 'none');
-      applyLight();
-    }
     onLensChange(lens, heightSummary(buildings.features, lens.category));
     if (hoverPoint) hoverFrame ??= requestAnimationFrame(hoverCursor);
   }
@@ -580,7 +528,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     put('context-buildings', 'fill-extrusion-color', contextAtmosphereColor(theme, center));
     // The decks carry a `match` on their own `foot` tag, so the pedestrian crossing stays the warmer one through the
     // whole walk, and the walk still gets to move both ends of it.
-    if (!school) for (const layer of bridgeLayers(theme)) put(layer.id, 'fill-extrusion-color', layer.paint['fill-extrusion-color']);
+    for (const layer of bridgeLayers(theme)) put(layer.id, 'fill-extrusion-color', layer.paint['fill-extrusion-color']);
     put('building-selection', 'fill-extrusion-color', theme.selection);
     put('building-selection-flat', 'fill-color', theme.selection);
     put('radius-line', 'line-color', theme.radius);
@@ -588,12 +536,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     put('tower-label', 'text-halo-color', theme.towerHalo);
     put('poi-markers', 'text-color', theme.poiText);
     put('poi-markers', 'text-halo-color', theme.poiHalo);
-    if (school) {
-      for (const [layer, [property, value]] of Object.entries(groundColors(id))) put(layer, property, value);
-      put('walking-route', 'line-color', theme.radius);
-      put('school-building-groups', 'fill-extrusion-color', buildingAtmosphereColor(theme, 450));
-      put('school-building-contact', 'line-color', theme.maquette.contact);
-    }
     return paint;
   }
   // What no expression can walk: the facade grid, the river tile, which texture the basemap's patterned fills use, and
@@ -628,7 +570,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
       const pattern = { ...layer.paint, ...baseAtmospherePaint(layer, theme) }['fill-pattern'];
       if (pattern !== undefined) map.setPaintProperty(layer.id, 'fill-pattern', pattern);
     }
-    if (school) return;
     map.setPaintProperty('building-facade', 'fill-extrusion-pattern', facadePattern(id));
     // 广场那四层跟着氛围走色：草坪与水面用它们自己的档，石材用 `plaza`/`plazaWalk`。
     if (plaza) for (const layer of plazaLayers(theme)) map.setPaintProperty(layer.id, 'fill-color', layer.paint['fill-color']);
@@ -652,7 +593,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     }
   }
   function atmosphereLight(id) {
-    return school && lens.mode === 'use' ? ATMOSPHERES[id].maquette.light : ATMOSPHERES[id].light;
+    return ATMOSPHERES[id].light;
   }
   function applyLight(override) {
     const light = override ?? atmosphereLight(atmosphereId);
@@ -695,7 +636,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     applyLight();
     applySky();
     towerLayer?.setAtmosphere(theme.tower);
-    if (school) map.triggerRepaint();
   }
   function setAtmosphere(id, { instant = false, duration = ATMOSPHERE_MS } = {}) {
     const previous = stopMood();
@@ -771,28 +711,26 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     return svg;
   }
   const landmarkElements = new Map();
-  if (!school) {
-    map.setLayoutProperty('tower-label', 'visibility', 'none');
-    for (const landmark of LANDMARKS) {
-      const node = document.createElement('button');
-      node.type = 'button';
-      node.className = 'landmark';
-      node.dataset.osmId = String(landmark.osmId);
-      node.setAttribute('aria-label', landmark.name);
-      const gem = landmarkGlyph(landmark.osmId);
-      const name = document.createElement('span');
-      name.className = 'landmark-name';
-      name.textContent = landmark.name;
-      node.append(gem, name);
-      // The click has to stop here: a nameplate is inside the canvas container, and without this the same press also
-      // reaches the map's own click handler, which closes the card that was just opened.
-      node.addEventListener('click', (event) => { event.stopPropagation(); openLandmark(landmark); });
-      landmarkElements.set(landmark.osmId, node);
-      // `interactive` is not optional: a MapLibre marker sets `pointer-events: none` on its element without it, and the
-      // button then swallows nothing and answers nothing.
-      new maplibregl.Marker({ element: node, anchor: 'bottom', offset: [0, -6], interactive: true })
-        .setLngLat(landmark.center).addTo(map);
-    }
+  map.setLayoutProperty('tower-label', 'visibility', 'none');
+  for (const landmark of LANDMARKS) {
+    const node = document.createElement('button');
+    node.type = 'button';
+    node.className = 'landmark';
+    node.dataset.osmId = String(landmark.osmId);
+    node.setAttribute('aria-label', landmark.name);
+    const gem = landmarkGlyph(landmark.osmId);
+    const name = document.createElement('span');
+    name.className = 'landmark-name';
+    name.textContent = landmark.name;
+    node.append(gem, name);
+    // The click has to stop here: a nameplate is inside the canvas container, and without this the same press also
+    // reaches the map's own click handler, which closes the card that was just opened.
+    node.addEventListener('click', (event) => { event.stopPropagation(); openLandmark(landmark); });
+    landmarkElements.set(landmark.osmId, node);
+    // `interactive` is not optional: a MapLibre marker sets `pointer-events: none` on its element without it, and the
+    // button then swallows nothing and answers nothing.
+    new maplibregl.Marker({ element: node, anchor: 'bottom', offset: [0, -6], interactive: true })
+      .setLngLat(landmark.center).addTo(map);
   }
   // Two plates that touch read as one garbled line, and the six landmarks sit close enough together for that well
   // before the camera reaches the tower. The sizes are measured once per layout rather than per pass: reading
@@ -838,12 +776,10 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   const repaintPlates = () => {
     plateFrame ??= requestAnimationFrame(() => { plateFrame = undefined; seatLandmarks(); });
   };
-  if (!school) {
-    measurePlates();
-    seatLandmarks();
-    map.on('move', repaintPlates);
-    map.on('resize', () => { measurePlates(); seatLandmarks(); });
-  }
+  measurePlates();
+  seatLandmarks();
+  map.on('move', repaintPlates);
+  map.on('resize', () => { measurePlates(); seatLandmarks(); });
   function landmarkCard(landmark) {
     const card = document.createElement('div');
     card.className = 'building-card landmark-card';
@@ -986,7 +922,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     close.setAttribute('aria-label', closeLabel);
     close.focus({ preventScroll: true });
     cardBlock = blockId;
-    popup.on('close', () => { popup = undefined; cardBlock = undefined; document.body.dataset.card = 'closed'; document.body.dataset.cardPill = null; setOutline(null); map.getSource('walking-route')?.setData(featureCollection()); if (selection) { selection = null; writeHash(); } });
+    popup.on('close', () => { popup = undefined; cardBlock = undefined; document.body.dataset.card = 'closed'; document.body.dataset.cardPill = null; setOutline(null); if (selection) { selection = null; writeHash(); } });
     return popup;
   }
   // A card whose point sits near a viewport edge gets clipped there, so the point is slid along the ground by exactly the
@@ -1229,7 +1165,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   function nearTraffic() {
     return nearField?.readout() ?? null;
   }
-  // 广场那四层的读数：每层几块、切没切出来。景泰没有这一格，所以那里必须是 null。
+  // 广场那四层的读数：每层几块、切没切出来。没切出广场时这一格就是 null。
   function plazaState() {
     if (!plaza) return null;
     return { ...plaza.report, layers: [PLAZA_LAWN, PLAZA_POOL, PLAZA_STONE, PLAZA_WALK].filter((id) => map.getLayer(id)).length,
@@ -1287,7 +1223,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // Trackpad pointers land a few pixels off a ~20 px icon, so hit-test a small box instead of one point.
   const box = (point, size) => [[point.x - size, point.y - size], [point.x + size, point.y + size]];
   const poiAt = (point) => map.queryRenderedFeatures(box(point, 6), { layers: ['poi-markers'] });
-  const extrusions = [school ? 'school-campus' : 'canton-tower-hit', ...(school ? ['school-building-groups'] : ['landmark-forms-hit']),
+  const extrusions = ['canton-tower-hit', 'landmark-forms-hit',
     'neighborhood-buildings', 'neighborhood-buildings-overview', 'height-estimates', 'height-unknown'];
   const buildingAt = (point) => {
     const hits = map.queryRenderedFeatures(box(point, 2), { layers: extrusions });
@@ -1341,42 +1277,19 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     const snapshot = buildings.features.find((building) => String(building.properties.osmId) === String(feature.properties.osmId));
     const properties = snapshot?.properties ?? feature.properties;
     const geometry = snapshot?.geometry ?? feature.geometry;
-    const flat = properties.campus || (lens.mode === 'height' && properties.heightSource === 'estimate');
-    computeGroups();
-    const members = groups && snapshot ? groups.groupOf(properties.osmId)?.features.filter((building) => drawn(building.properties)) ?? null : null;
-    const display = school && lens.mode === 'use' ? displayForLens().byMember.get(String(properties.osmId)) : null;
-    const merged = Boolean(display?.properties.aggregate);
+    const flat = lens.mode === 'height' && properties.heightSource === 'estimate';
     onBuildingClick({
       properties,
       outline: { type: 'Feature', properties: { height: properties.tower ? towerHeight : flat ? 0 : properties.displayHeight ?? properties.height, base: flat ? 0 : properties.base }, geometry },
-      ...(display ? { displayOutline: display } : {}),
-      ...anchorPoint(display ? display.geometry : geometry),
-      ...(members && members.length > 1
-        ? { group: { ...groupStats(members, DEFAULT_CENTER), rules: groups.rules, merged,
-          outlines: merged ? [selectionOutline(display)] : members.map(selectionOutline) } }
-        : {}),
+      ...anchorPoint(geometry),
     });
-    // Share a real member's identity and interior point, never the synthetic outline's centre.
     const [lng, lat] = geometryPoint(geometry);
     selection = { osmId: buildingId(properties.osmId), lat, lng };
     writeHash();
   }
-  let groups = null;
-  const groupDisplays = new Map();
-  function computeGroups() {
-    if (school && !groups) groups = groupBuildings(buildings.features, { center: DEFAULT_CENTER, roads, campusGeometry });
-  }
-  function displayForLens() {
-    computeGroups();
-    if (!groupDisplays.has(lens.category)) groupDisplays.set(lens.category, groupDisplay(groups, lens.category));
-    return groupDisplays.get(lens.category);
-  }
-  // A group that highlights only part of itself has to say so with the same part, so the card's numbers come from the
-  // members the current lens actually draws.
-  const drawn = (properties) => (lens.category === 'all' || properties.category === lens.category)
-    && (lens.mode !== 'height' || lens.source === 'all' || properties.heightSource === lens.source);
+  // 高度透视镜里"高度未知"只画平面，所以卡片那一圈轮廓也得跟着压平，不然高亮会比图上多出一截体块。
   const selectionOutline = ({ properties, geometry }) => {
-    const flat = properties.campus || (lens.mode === 'height' && properties.heightSource === 'estimate');
+    const flat = lens.mode === 'height' && properties.heightSource === 'estimate';
     return {
       type: 'Feature',
       properties: { height: properties.tower ? towerHeight : flat ? 0 : properties.displayHeight ?? properties.height, base: flat ? 0 : properties.base },
@@ -1390,23 +1303,18 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     const building = buildingAt(event.point);
     if (building) selectFeature(building);
   });
-  // A schematic can retract past a member's saved point; pick its displayed interior without changing the shared identity.
   function focusPick() {
     const { osmId, lng, lat } = focus;
-    const display = school && lens.mode === 'use' ? displayForLens().byMember.get(String(osmId)) : null;
-    const point = map.project(display ? geometryPoint(display.geometry) : [lng, lat]);
+    const point = map.project([lng, lat]);
     const canvas = map.getCanvas();
     if (point.x < 0 || point.y < 0 || point.x > canvas.clientWidth || point.y > canvas.clientHeight) return null;
-    const hit = map.queryRenderedFeatures(box(point, 2), { layers: extrusions }).find((candidate) => String(candidate.properties.osmId) === String(osmId)
-      || (display?.properties.groupId && candidate.properties.groupId === display.properties.groupId));
-    if (hit?.properties.groupId) return buildings.features.find(building => String(building.properties.osmId) === String(osmId)) ?? null;
-    return hit ?? null;
+    return map.queryRenderedFeatures(box(point, 2), { layers: extrusions })
+      .find((candidate) => String(candidate.properties.osmId) === String(osmId)) ?? null;
   }
   function focusStep() {
     if (!focus) return;
     clearTimeout(focus.timer);
-    const ready = !map.isMoving() && map.isSourceLoaded('canton-buildings')
-      && (!school || lens.mode !== 'use' || map.isSourceLoaded('school-building-groups'));
+    const ready = !map.isMoving() && map.isSourceLoaded('canton-buildings');
     if (ready) {
       const hit = focusPick();
       if (hit) { focus = null; selectFeature(hit); return; }
@@ -1422,8 +1330,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     focus = { ...block, tries: 0 };
     // An instant easeTo can complete selection synchronously in moveend.
     focus.timer = setTimeout(focusStep, 900);
-    const display = school ? displayForLens().byMember.get(String(block.osmId)) : null;
-    map.easeTo({ center: display ? geometryPoint(display.geometry) : [block.lng, block.lat], zoom: Math.max(map.getZoom(), 15.4), padding: padding(), duration: reducedMotion.matches ? 0 : 800 });
+    map.easeTo({ center: [block.lng, block.lat], zoom: Math.max(map.getZoom(), 15.4), padding: padding(), duration: reducedMotion.matches ? 0 : 800 });
   }
   // One hit-test per animation frame rather than per mousemove: the three extrusion layers cost 0.73 ms on average and
   // 2.5 ms worst case, but a trackpad fires far more moves per second than frames, so the queue is collapsed here.
@@ -1470,7 +1377,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // The constructor ignores a camera outside the scene, but the address bar keeps whatever was typed, so a rejected
   // link would survive there and be copied onward by the next person to share the page. One write makes the bar
   // describe the camera actually on screen; a link's own block is re-added below once it is picked.
-  if (school) map.getSource('school-building-groups').setData(featureCollection(displayForLens().features));
   writeHash();
   // A shared link's card is opened the same way a click would open it, once the tiles under the shared camera are in.
   if (shared.selection) {
@@ -1541,15 +1447,13 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
       if (!poiFeatures.some((item) => item.id === poi.id) || (activeFilter !== 'all' && activeFilter !== poi.category)) return;
       manualInteraction(); selectedPoiId = poi.id;
       openPopup([{ lngLat: [poi.lng, poi.lat], anchor: undefined }], content, { closeLabel: '关闭地点卡片' });
-      if (school) map.getSource('walking-route').setData(featureCollection(poi.walkingRoute ? [{ type: 'Feature', properties: {}, geometry: poi.walkingRoute }] : []));
       map.easeTo({ center: [poi.lng, poi.lat], padding: padding(), duration: reducedMotion.matches ? 0 : 700 });
     },
     showBuilding(building, content) {
       manualInteraction();
-      const displayed = building.displayOutline ?? building.outline;
-      const blockId = buildingId(building.displayOutline?.properties.osmId ?? building.properties.osmId) || undefined;
-      openPopup(buildingSeats(displayed.geometry, building.lngLat, blockId), content, {
-        outline: building.group?.outlines ?? selectionOutline(displayed),
+      const blockId = buildingId(building.properties.osmId) || undefined;
+      openPopup(buildingSeats(building.outline.geometry, building.lngLat, blockId), content, {
+        outline: selectionOutline(building.outline),
         closeLabel: '关闭建筑卡片',
         blockId,
       });
@@ -1557,32 +1461,13 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     focusBuilding,
     startOrbit() {
       tour.exit(); stopOrbit(); popup?.remove(); map.stop(); cancelFocus();
-      map.jumpTo({ center, zoom: school ? (landscape() ? SCENE.camera.landscapeZoom : SCENE.camera.mobileZoom) : landscape() ? Math.max(14, Math.min(map.getZoom(), 14.4)) : Math.max(14.6, Math.min(map.getZoom(), 15.7)), pitch: 58, padding: padding() });
+      map.jumpTo({ center, zoom: landscape() ? Math.max(14, Math.min(map.getZoom(), 14.4)) : Math.max(14.6, Math.min(map.getZoom(), 15.7)), pitch: 58, padding: padding() });
       orbiting = true; frame = requestAnimationFrame(animate);
     },
     stopOrbit,
     hasCard: () => Boolean(popup),
     closeCard() { popup?.remove(); },
     recenter() { tour.exit(); stopOrbit(); cancelFocus(); popup?.remove(); map.flyTo({ ...heroCamera(), duration: reducedMotion.matches ? 0 : 1200 }); },
-    // V4-8 接力的上半场：导览、环绕、聚焦、卡片这些镜头的主人都得先让开，再把自己升成一枚圆盘。
-    // padding 抹平是中继那一格的取景框——对面那页开屏时也是同一格（零 padding 的正上方），切页才看不成跳。
-    liftOff(view, duration) {
-      tour.exit(); stopOrbit(); cancelFocus(); popup?.remove();
-      const flat = { top: 0, bottom: 0, left: 0, right: 0 };
-      return new Promise((resolve) => {
-        let settled = false;
-        const done = () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(guard);
-          resolve();
-        };
-        // 换页不能等一个永远不来的 moveend：地图被别的动作打断时也要走，只是那一格取景差一点。
-        const guard = setTimeout(done, duration + 900);
-        map.once('moveend', done);
-        map.flyTo({ ...view, padding: flat, duration, essential: true });
-      });
-    },
     overview() {
       tour.exit(); stopOrbit(); cancelFocus(); popup?.remove();
       const points = circle.geometry.coordinates[0];

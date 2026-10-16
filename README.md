@@ -1,324 +1,37 @@
-# 街区切片 · 广州塔与景泰小学
+# 街区切片 · 广州塔与珠江
 
-同一项目保留两个地区：默认 **广州塔周边3公里**，新增 **景泰小学（景泰校区）周边2公里**，顶部可随时切换。
+一个场景、两条渲染路径：默认 **广州塔周边 3 公里**走 MapLibre 现版，`?engine=three` 挂 three.js 那一套。
 
-- 景泰小学：`http://127.0.0.1:5174/?scene=jingtai`
-- 广州塔：`http://127.0.0.1:5174/?scene=canton`
+- 广州塔：`http://127.0.0.1:5174`
+- 同一份数据的新引擎：`http://127.0.0.1:5174/?engine=three`
 
-## 景泰小学：真实数据与尚未满足的两项要求
+## 景泰小学那一整块撤下（2026-10-16）
 
-中心采用附件明确核验的 WGS84 **23.17107, 113.26646**，落在 OSM **way/1178149399** 的校园边界内，地址为**云龙路38号**。不是柯子岭校区；Apple 链接里的坐标未直接当作 WGS84 使用。展示半径按最新要求取2公里，不采用附件旧1公里半径。
+用户的两句话把范围定死了：「景泰小学这部分删掉吧，不要了」→「我直接不要这部分内容在整个项目了，就留广州塔就行了」。所以撤的不是顶栏那个按钮，而是那一整条线——数据、专属模块、脚本、文档取证与测试。
 
-快照包含 **5,686个建筑/部件要素**，分两层：**906 栋来自 OpenStreetMap（ODbL，含15个关系建筑），其中4个有OSM高度标注、5个按层数换算、897个高度未知**；另有 **4,780 个影像推导轮廓**（东亚建筑矢量数据集，Zenodo `10.5281/zenodo.8174931`，CC BY 4.0，2023-04 成图），来源无用途、名称、地址与高度字段，一律按 `unknown` 归类，且不进入楼名与地址检索、不生成 OSM 链接。标注不等于实测：普通视图里无高度的体块按 9.6–24 米**沙盘示意厚度**绘制（按体块短边推导，不代表实际楼高），高度模式只画平面。校园用地独立青绿填充与描边，不计入建筑高度统计。地面包含19个球场面、1个跑道面、11个公园/花园面及12个林地/自然保护区要素；白云山保留真实 Polygon/MultiPolygon 与洞，**没有三维地形高程**。
+**撤掉的清单。**
 
-生活配套本地快照共 **115处**：学校18、公园球场33、地铁8、餐饮33、购物23。含三泰公园东、西苑和23处球场（19面、4点；点不补画虚构面）。地铁按站聚合，包含飞翔公园、大金钟路、中医药大学；原始标签均为地铁站且有早于快照的开通日期，不以地图快照保证实时运营。首次打开地点面板才下载，分类和重复展开复用内存，学校页面不请求 Overpass；关闭面板同时收起标记。
+- 界面：`index.html` 顶部 `#scene-nav` 两条场景链接；`src/style.css` 里 `.scene-nav*` 与全部 `body[data-scene='jingtai']` 规则（含三条 `@media` 块）、`.poi-icon.school`／`.poi-icon.park`／`.walking-note`／`.school-data-note`。顶栏网格从三格收成 `'brand actions' / '. atmosphere'`。
+- 场景表：`src/scenes.js` 只剩 `canton` 一格，`resolveScene` 一字未改，所以别人收藏的 `?scene=jingtai` 不再指向一个已撤下的场景，而是安静落回塔。
+- 只服务它的模块 8 个：`src/{jingtai-data,coverage-audit,names,footprints,groups,grounds,walking,scene-flight}.js`。
+- 数据 10 份：`public/data/jingtai-*` 6 份（约 3.6 MB）与 `data/jingtai-*` 4 份。**高德那一条外部依赖随 `data/jingtai-amap-names.json` 一起离场**：取数脚本、`src/names.js` 匹配层、`vite.config.js` 里那条只放行本地快照的 dev 中间件全部退场，项目从此只剩 OpenFreeMap／Overpass 这一批公开来源。`AMAP_KEY` 仍留在 `.env.local` 里，仓库不读它。
+- 文档与取证：`docs/jingtai-upgrade-plan.md`、`docs/audits/jingtai-*` 8 份、`docs/screenshots/` 里 137 张景泰取证（135 张 `jingtai-*`，另两张 `canton-v8-phase1-jingtai.png`／`v8-scene-flight-3-jingtai.png` 是 V8 Phase 1 与 V4-8 那两节按名引用的，删它们时把引用句一并改成"随场景撤除"）。
+- 脚本 10 个：`prepare-jingtai`、`diff-jingtai-source`、`merge-jingtai-footprints`、`audit-jingtai-coverage`、`probe-jingtai-basemap`、`probe-jingtai-render`、`extract-eastasia-footprints`、`prepare-amap-names`、`prepare-block-roads`、`shot-scene-flight`。
+- 测试：整册撤 8 个文件（`coverage-audit`／`eastasia-extract`／`footprints`／`groups`／`jingtai-data`／`jingtai.browser.spec`／`names`／`scene-flight`）；共用十一册（`block-layout`／`link`／`scenes`／`tour`／`engine`／`search`／`river`／`near-field`／`signals`／`browser.spec`／`engine.browser.spec`，另加 `tests/live-places.js` 那句说明）只删景泰那几格判据、悬空 import 与不再成立的对照句，**广州塔的判据一字未改、一条没放宽**。`scripts/inject-teardown-browser.mjs` 那格注入锚点跟着 `boot.js` 改成无条件装配那一行同步换了写法（判据本身没动）。
 
-**数据缺口，不计作已完成验收：**
+**跟着一起消失的四件事。**
 
-1. 正确校园内的原始 OSM 快照没有 `pitch/track`，所以没有补画红跑道或把校外球场移入校园；附件要求的「红绿操场作为首屏主角」尚未实现。首屏与校园卡片均明确显示缺失说明。**2026-10-06 按本地正式快照复核过，结论不变**：`public/data/jingtai-grounds.geojson` 44 面里确有 19 个球场面与 1 条跑道，但**落在校园面（`way/1178149399`，包围框 113.26597~113.26696 / 23.17064~23.17150）之内的是 0 面**，离校园质心最近的是 580 m 外的一片网球场（其次 594／609／621 m 的篮球场与网球场）。所以"缺操场"不是没去取球场数据，而是这份来源里校园自己没有。
-2. 校门/校园边界与可步行路网没有可靠共享节点，无法给出真实步行距离。地铁卡片显示「步行距离暂缺」、原因和单独标明的直线距离，不用直线乘系数替代。保留2.5公里路网与出入口证据，Dijkstra仅沿共享OSM节点、允许步行的边计算；不自动跨墙、跨路接点。**2026-10-06 想按最新 OSM 再核一次，当天没核成**：`overpass-api.de` 对该查询返回 HTTP 504（7 s 内），`overpass.kumi.systems` 与 `overpass.private.coffee` 各 100 s 超时零字节。这一条的复核需要网络，本地快照替代不了它。
+1. **V4-8 的两段接力**（#155）：`liftOff`、`relayView`、`sessionStorage` 那一格交接记录、`src/engine/scene.js` 的 `arrive` 入口与开场 `flyTo` 一并撤。它存在的唯一理由就是塔↔景泰之间那 3,731 m 的空圈（实测两圈之间隔这么多），对面那页没了，接力也就没了。
+2. **按小区推断的那批楼名**（#63～#66）与东亚影像轮廓那条合并链（#44～#49、#52～#55、#161）——两条都只长在那一份快照上，欠账 #67 随之作废。
+3. **数据阻塞那一格 #34**（校园操场／校门步行距离）：它问的是景泰校园自己有没有操场，场景撤了，这一格不再挂在账上。
+4. `src/block-layout.js` 缩回两条导出：`schematicThickness` 与 `schematicDisplayHeights`。街坊包络、-15° 规整、道路与校园裁避都在撤掉的那一侧；广州塔这一侧从来只用得上这条短边曲线（#77，`src/map.js:13`）。
 
-学校复用三档氛围、城市透视镜、搜索、卡片与相机分享；校名和「云龙路38号」可定位校园。导览为校园→三泰公园东苑→西苑→白云山林地边界，末站是实际边界顶点，不是观景台，整条导览不是步行路线。场景链接完整导航并清除旧场景hash，分享地址保留 `?scene=jingtai`；关系建筑用 `b=relation/ID@纬度,经度`，旧way数字链接不变。
+**没动的东西。** `backup/`、`candidates/`、`dist-p1merge/` 三份撤销路径与被测试／文档按名引用的产物原样保留；`public/data/canton-*` 逐字节未改。上面那些被删的文件都还在 git 历史里，**要回头就是 `git revert` 这一笔**，不必手工捡。
 
-原始响应 `data/jingtai-overpass.json` 不改写，`data/jingtai-source.json` 保存查询、时间、端点和SHA256；五个静态产物由本地输入确定性生成。复现无需联网：
-
-```bash
-node scripts/prepare-jingtai.mjs
-node --test tests/jingtai-data.test.js tests/scenes.test.js
-```
-
-确需更新时才运行 `node scripts/prepare-jingtai.mjs --fetch`；覆盖当前快照前应另存现有版本。完整查询使用 `out body geom` 保留道路节点编号及几何。五个产物是 `public/data/jingtai-{buildings.geojson,buildings-index.json,grounds.geojson,pois.json,metadata.json}`，许可与完整报告位于metadata文件，均保留OpenStreetMap/ODbL来源。
-
-撤销入口：仅切回旧地区可点击「广州塔」，无需删数据。若撤销整个新地区，成组移除 `src/scenes.js` 的学校配置、`src/config.js`/`src/main.js`/`src/map.js`/`src/tour.js` 的学校分支及顶部导航/学校CSS，再移除 `src/grounds.js`、学校数据生成/路网代码、对应数据与测试；保留广州塔原始快照、三档氛围、透视镜和导览。半径分别在 `src/scenes.js` 调整，不要只改界面数字。
-
-### 学校场景验收（2026-09-22）
-
-237项Node测试通过，生产构建通过。最新双场景功能回归（不含五分钟段）共29项：首次 **24通过、3失败、2项明确fixme**；三项失败独立复跑 **3/3通过**，不是首次全绿。三份浏览器trace均记录 OpenFreeMap 的 `styles/liberty` 请求 `net::ERR_CONNECTION_CLOSED`，本地代码及建筑/校园数据返回200，失败发生在入口启用前；未放宽超时、替换真实底图或跳过断言。复跑实时广州塔地点33.4秒、1次查询、页面异常0。学校合计 **8项可执行项通过、2项数据缺口fixme**，不是10项全通过；覆盖校园地址搜索及新页分享、关系建筑与洞外锚点、8个地铁站卡片、115地点不截断、失败重试、关闭后标记清空、四站自动导览与手动前后切换、暂停/退出、减少动态效果、场景往返和独立资源。更早一次学校地点初始化超时没有trace，独立复跑通过，但不据此推断它也必然属于同一原因。公共底图服务可用性不作保证。
-
-五分钟广州塔段已在搜索定时器修复后、最后一次POI卡片CSS调整前通过，本轮功能复跑未重复该段：300,007ms、30次操作、17,961次动画帧回调，间隔P95 16.7ms / P99 16.8ms、最长66.7ms，JS堆59.8→70.7MB，新增地点请求0、页面异常0；不是GPU绘制帧率或垃圾回收后的泄漏证明。
-
-390×844、320×568、568×320、667×375、844×390、1024×768下校园中心可点击，双面板无越界/相交，地区/氛围/搜索/地点/署名入口可操作。320像素短竖屏仅学校收紧说明和透镜、调整相机留白；导览面板给展开后的署名留出空间，极矮横屏内部滚动。真实注入透镜盖住校园后，同一点击断言失败，恢复后通过。减少动态效果的搜索另发现并修复同步 `moveend` 清掉选择后再写定时器的空引用；先注册定时器、每次拾取前取消旧定时器，Node模拟瞬时命中/延迟命中/动画完成，并拒绝两种回退变异。
-
-生产预览在390×844实际验证校园卡与新页分享、关系建筑来源、地铁缺失说明、氛围、透镜、学校四站及往返广州塔；两地区的减少动态效果搜索均正常，页面异常与控制台警告/错误为0。15秒学校环绕记录900次MapLibre渲染事件、约60次/秒，间隔P95约17.6ms，无新增数据请求；不是GPU绘制帧率或跨设备性能保证。
-
-新增双行导航后，广州塔375×667长地点卡曾顶到70.23px、被底边105px的导航遮住。仅对宽度不超过567px、地点面板打开时的POI卡，将最大高度从 `31dvh - 37px` 收紧到 `31dvh - 81px`，保留内部滚动，不改建筑卡片选座。原边界断言通过，临时恢复旧高度会使同一断言失败。最新生产预览在320×568、375×667、390×844实测学校地铁卡顶部均超过113px、底部低于视角控制条，来源链接可滚动点击、关闭按钮可点，Esc逐层关闭并恢复焦点，页面与控制台错误为0。
-
-撤销这项卡片调整可删除 `src/style.css` 的窄屏 `.maplibregl-popup-content:has(.poi-card)` 高度覆盖及对应旧样式变异测试，但会恢复上述导航遮挡。学校短屏构图可分别还原 `src/map.js` 的学校短屏 `padding.top` 分支和 `src/style.css` 的学校短屏/导览媒体规则；不要连带更改广州塔建筑卡片避让优先级。搜索定时器修复位于 `focusBuilding` 与 `focusStep`，单独回退会重新引入减少动态效果下的空引用，需同步处理 `tests/link.test.js` 的定时器契约。
-
-截图：[桌面首屏](docs/screenshots/jingtai-desktop.png)、[2公里总览](docs/screenshots/jingtai-overview.png)、[390竖屏](docs/screenshots/jingtai-390.png)、[320短竖屏](docs/screenshots/jingtai-320.png)、[568横屏](docs/screenshots/jingtai-568.png)、[校园卡](docs/screenshots/jingtai-campus-card.png)、[关系建筑卡](docs/screenshots/jingtai-relation-card.png)、[地铁卡](docs/screenshots/jingtai-station-card.png)、[夜景](docs/screenshots/jingtai-night.png)、[竖屏导览](docs/screenshots/jingtai-tour-320.png)、[横屏导览](docs/screenshots/jingtai-tour-568.png)。
-
-### P0：校园近场覆盖基准与半径边界修正（2026-09-22）
-
-按 `docs/jingtai-upgrade-plan.md` 执行 P0。建筑入图条件由「最近顶点在半径内」改为「几何与中心圆相交」：新增 `src/buildings.js` 的 `distanceToGeometry`，面内（含洞）取 0，否则取到任一边的最近点，环未闭合或传入非面几何直接报错，不再静默给出错误距离；`src/geo.js` 导出 `EARTH_RADIUS` 与 `METERS_PER_DEGREE` 供该谓词使用；`src/jingtai-data.js` 的地面、关系建筑与 2 公里校验改用同一条规则，生成、报告与测试不再各写一套半径判定。`properties.distance` 的含义随之变为最近边距离。
-
-审计由 `src/coverage-audit.js` 与 `scripts/audit-jingtai-coverage.mjs` 完成，输入只有本地原始快照与产物，不发网络请求，输出 `docs/audits/jingtai-coverage.md`；渲染环节由 `scripts/probe-jingtai-render.mjs` 用同镜头 `queryRenderedFeatures` 取证，输出 `docs/audits/jingtai-render.json`。分区结果（原始要素／产物栋数）为 100 m **0／0**、200 m 2／2、300 m 17／17、500 m **157／156**、1000 m 370／370、2000 m 908／906。关键结论有三条：**边界规则差异 0 处**，即顶点判定漏掉、相交判定收回来的建筑在本数据集里一栋也没有，半径边界不是近场缺楼的原因；**近场转换缺失 0 处**，500 m 档 157 处原始要素全部进入产物（表内 156 与 157 的差值是产物环坐标四舍五入到 7 位小数后按产物几何重算刚好越过分界，该楼仍在产物内）；**渲染缺失 0 栋**，首屏镜头视野内 444 栋全部命中，近景镜头视野内 182 栋全部命中。2 公里内唯一未入图的原始建筑是 `way/1412636881`（广州体育馆站，`building:levels=-1`）。因此近场可见的空缺属于**原始来源不存在**，归 P1 处理；已入图的 156 栋近场建筑全部只有 9.6 米示意高度，属「已显示但视觉辨识不足」，归 P2 处理。（本段是 2026-09-22 P0 当时的记录，上述分区数字只对 OSM 那一层成立；正式快照自下文 P1-7 起含第二来源，最新分区看 `docs/audits/jingtai-coverage.md` 的「正式快照（public/data，OSM＋东亚轮廓）」行，渲染探测也改为按 `EVIDENCE_TAG` 输出分文件。）
-
-覆盖率仍**不能评估**：项目没有独立且具备合法使用权限的近场建筑核对清单，当前 OSM 快照不能自证完整，「原始来源不存在」不等于「现实中没有楼」。核对清单放入 `docs/audits/jingtai-reference.json`（每项含位置、来源、核验日期、许可）后，审计会自动逐项比对并给出四类归因。
-
-新规则产物写入 `candidates/jingtai-p0/`，`public/data` 未替换：`node scripts/prepare-jingtai.mjs --out=candidates/jingtai-p0`。与正式快照逐项比对为 906 栋成员完全一致、几何零差异、检索索引 75 条顺序不变，仅 10 栋建筑和 1 处地面的四舍五入 `distance` 变化且变化不超过 1 米。`tests/jingtai-data.test.js` 记录正式快照五个产物的 SHA-256，正式数据被本阶段意外改动会直接失败；同文件另确认候选产物可用本地输入逐字节复现，且正式与候选两套快照均通过 `validateJingtai`。基线截图：[首屏镜头](docs/screenshots/jingtai-p0-hero.png)、[近景镜头](docs/screenshots/jingtai-p0-near.png)。（本段是 P0 当时的比对：自下文 P1-7 起正式快照多出影像层，`validateJingtai` 在测试里只跑从正式快照剥出的 906 栋 OSM 层，整份合并快照改由 `validateMergedJingtai` 校验，两者的分工见 P1-7 一节。）
-
-`tests/coverage-audit.test.js` 新增 7 项，含三类缺陷注入：删除一栋已核验建筑必须让 100 m 档检查失败、制造一次错误半径剔除必须让该档 `radiusExcluded` 由 0 变 1、在外围堆量而近场不动必须让「近场原始要素全部入图」断言失败；另验证谓词语义（面内为 0、洞、跨界长条楼在顶点全部超距时仍被收进、MultiPolygon、开环报错）与报告文本由数据推导。合计 **245 项 Node 测试通过**，生产构建通过（主包 1,636.17 kB / gzip 437.75 kB，CSS 113.17 kB / gzip 17.19 kB，Worker 508.48 kB）。
-
-双场景浏览器回归结果口径如下。学校场景 **8 项通过、2 项数据缺口 fixme、0 失败**（1.7 分钟）。广州塔场景首次 **19 通过／1 失败**（24.5 分钟），失败项是窄屏循环中等待实时地点列表：浏览器内 `maps.mail.ru` 与 `overpass-api.de` 两个端点同时返回 HTTP 504，页面按设计显示「地点服务暂时不可用（HTTP 504）」且列表为空；服务恢复后单独复跑该项 35.2 秒通过，未放宽超时、未新增自动重试、未跳过断言，公共接口可用性仍不作保证。五分钟连续操作段本轮重复执行：300,005 ms、30 次操作、17,998 次动画帧回调，帧间隔 P95 16.7 ms／P99 16.8 ms、最长 33.4 ms，JS 堆 58.2 → 82.1 MB，期间新增地点请求 0、页面异常 0；未强制垃圾回收，帧间隔不是 GPU 绘制帧率，不能据此证明无内存泄漏。
-
-本轮发现并修正一处自身引入的缺陷：项目原先没有 Playwright 配置，测试目录默认为项目根，`backup/pre-p0/tests/` 的备份副本会被当作活测试执行（`--list` 为 60 项／4 文件）。新增 `playwright.config.js` 仅设 `testDir: './tests'`，发现范围恢复为 **30 项／2 文件**。
-
-`scripts/prepare-buildings.mjs` 与学校共用 `normalizeBuildings`，广州塔 3 公里快照**未重新生成**；`tests/buildings.test.js` 固定 3990 栋与 3 公里半径，若日后重生成导致边界楼数变化会立即报错，届时须连同该断言与说明一起更新。
-
-撤销 P0：删除 `candidates/jingtai-p0/`、`docs/audits/jingtai-coverage.md`、`docs/audits/jingtai-render.json`、`src/coverage-audit.js`、`scripts/audit-jingtai-coverage.mjs`、`scripts/probe-jingtai-render.mjs`、`tests/coverage-audit.test.js`、两张 `jingtai-p0-*.png` 与 `playwright.config.js` 即可，正式快照无需重生成。注意 `docs/audits/` 与 `candidates/` 现已同时装着 P1 的核查产物与候选数据，别整目录删，按上面逐项删。若还要撤销半径判定本身，另需还原三处行级改动：`src/geo.js` 的两个常量导出、`src/buildings.js` 的 `distanceToGeometry` 与 `normalizeBuildings` 内改回顶点距离、`src/jingtai-data.js` 的 `geometryDistance`；`scripts/prepare-jingtai.mjs` 的 `--out` 参数可单独保留。其余文件可从 `backup/pre-p0/`（45 个文件，附 `SHA256SUMS.txt`，`shasum -c` 全部通过）恢复。
-
-### P1：建筑轮廓补充来源核查（2026-09-23）
-
-按 `docs/jingtai-upgrade-plan.md` 执行 P1 的第 1～3 步（找来源并核覆盖），本阶段**未改动任何 `src/` 文件与 `public/data/` 产物**，生产构建产物与 P0 逐项相同（主包 1,636.17 kB / gzip 437.75 kB，CSS 113.17 kB / gzip 17.19 kB，Worker 508.48 kB），`npm test` 仍为 **245 项通过**；浏览器套件本轮未重跑，因为它覆盖的交互与渲染代码没有一行变化。证据全部写进 `docs/audits/jingtai-p1-sources.md`，四条结论如下。
-
-第一条，OSM 本身没有新增。`node scripts/prepare-jingtai.mjs --fetch --fetch-only --raw-dir=candidates/jingtai-p1 --out=candidates/jingtai-p1` 重抓一次完整快照（单次请求，不对同一端点重试），再用 `scripts/diff-jingtai-source.mjs` 按内容逐要素比对两份快照：基准 2026-09-22T06:51:02Z、候选 2026-09-23T01:13:01Z，要素总数同为 23,492、建筑要素同为 910，新增 0、删除 0、标签变化 0、几何变化 0，六个分档（100/200/300/500/1000/2000 m）建筑数逐档相等，近场 500 m 净变化 **+0 栋**。候选产物与 P0 产物逐字节相同，只有 POI 文件的来源信封（`osmTimestamp`、`rawSha256`）因新抓取而变，115 条 POI 字段零差异，故 P0 的分档数字继续有效、审计不重跑。按计划书要求明确记为**无改善**，不把反复请求本身当作补全。
-
-第二条，底图不互补且不可归因。用 `scripts/probe-jingtai-basemap.mjs` 在同一镜头下取底图 `context-buildings` 瓦片要素，并按 500 m 步长做格点采样：1,994 个采样格里底图有 1,638 个、数据集独有 1,989 个、两者都有 1,633 个，**只有底图命中的仅 5 格**；在底图自身的 maxzoom 14 上取到 116 个要素、去重后 113 个带数字 id，其中能与本快照对上的只有 **10 个**，而同一视野内快照有 882 栋、其中 872 栋不在这些瓦片里。三条独立理由：底图切片是 2026-09-13 的同一 OSM 上游（早于本地 2026-09-22 快照），不是独立来源；瓦片要素不携带 OSM 身份，无法给每个元素记"原始身份"；半径内本来就不画底图建筑。许可侧同时记一笔，OpenFreeMap/OpenMapTiles/ODbL 与本项目不冲突，冲突点在混合许可能否合并再分发尚未澄清。
-
-第三条，两个主流开放矢量来源在广州是零覆盖。Microsoft Building Footprints（2026-08-13 发行、30,340 个瓦片）的 225 个区域名里没有任何中国大陆条目，按 Bing quadkey 索引广州所在 L5 前缀 `13212` 命中 **0** 个瓦片，且其许可声明在 README（CDLA-Permissive-2.0）与 Planetary Computer 目录（ODbL-1.0）两处不一致。Google Open Buildings 走 Source Cooperative 云原生镜像，纯 JS 的 `hyparquet` 按 Range 只读 `quadkey` 字典列：CN 分区 2,713,208 栋只落在 59 个 z8 瓦片，校园瓦片 `13212222` 与其 3×3 邻域均为 **0** 栋，最近的有数据瓦片距校园 **486 km**；扫描带三道自校验（quadkey 往返、逐 row group 行数、总和等于 `num_rows`——首版正是靠最后一条抓出 91 倍重复累加）。Overture `theme=buildings` 的建筑内容是上述两家的聚合，非 OSM 增量预期为 0，且发行按 hash 分片（987 个约 500 MB 文件），做同等负证明需扫约 50 GB，故不接入。可达性一并记录：`data.source.coop`、`api.github.com`、`download.openstreetmap.fr`（`guangdong-latest.osm.pbf` 192,544,478 B，2026-09-23T01:02:43Z）可用；`storage.googleapis.com`、`sites.research.google`、`raw.githubusercontent.com`、Geofabrik、HOT 导出、`data.gz.gov.cn` 本机不可达，按事实记录不作推断。
-
-第四条是本阶段唯一的实质进展：找到并实测了第四个来源——东亚建筑矢量数据集（Zenodo DOI `10.5281/zenodo.8174931`，中山大学团队，2023-07-22 发布，记录声明 CC BY 4.0、open access）。它按地级市切分，Zenodo 支持 HTTP Range，因此只取 `China/Guangdong/Guangzhou.shp` 一个成员（压缩 126,024,029 B，解压 261,559,312 B，占整包 23.1 GB 的 0.55 %，本机 1,227 s 下完，解压长度与 zip 中央目录声明逐字节相等），坐标系为 `.prj` 声明的 **EPSG:32649**（WGS84/UTM 49N），1,792,111 条记录与 `.dbf` 行数一致。**覆盖检查成立**：用与 P0 完全相同的 `distanceToGeometry` 相交规则分档，100 m 档 **62** 个轮廓（P0 该档为 0），且这 62 个在 15 m 内找不到任何 OSM 轮廓对应；500 m 档累计 1,046 个、其中 **785** 个为净增。两条控制实验保证不是虚数：正控制——我们自己的 156 栋近场 OSM 楼里 154 栋在该数据集 0 m 命中（中位 0、P90 0、最大 53.14 m），说明投影反算与解析链对得上实物；负控制——中心北移 0.1°（约 11 km）后 2 km 内命中 0 条。
-
-但这个来源过不了另外三道门，因此没有接入。一是**逐要素来源填不出值**：`.dbf` 只有 `id`、`ORIG_OID`、`STATUS`、`ORIG_FID` 四列，`STATUS` 取值 0/1/2 而归档内 2,878 个成员没有任何 README、LICENCE 或代码表，记录页摘要只有一句话。二是**许可链上游未清**：CC BY 4.0 是作者对自己成品的声明，而该团队配套论文与报道写明轮廓由高分辨率 Google Earth 影像提取（2024 年全球版 2.8 亿栋），2025 年 ESSD 全球版又写明以人工筛选的 OSM 注记作训练——计划书禁止描摹商业地图截图并称之为 OSM 数据、禁止把免费浏览当作再分发许可，第三方给的开放许可并不自动清掉上游影像条款，这一层属授权判断，交用户决定而不代答。三是**质量与时效**：字段里没有 `height` 也没有 `levels`，解决不了 P0 记下的"156 栋近场楼全部只有 9.6 m 示意高度"（属 P2）；`CreaDate` 为 20230423，比本地快照早 3 年 4 个月；增量里 100 m 档 62 个合计 7,508 m²、其中 1 个不足 1 m²、6 个在 1–20 m²、质心相距 1 m 内的重复 2 对，500 m 档 785 个增量中不足 20 m² 的占 20.6 %、重复 17 对，接入前必须先做面积阈值与重叠合并筛选。所以 P1 的验收句照原样成立：**来源未通过覆盖、许可、坐标系检查前，不承诺接入成功**，本阶段不以视觉填充交付，`public/data` 与 `data/` 正式快照均未被替换。
-
-本轮新增文件：`docs/audits/jingtai-p1-sources.md`（四段结论与解锁条件）、`docs/audits/jingtai-source-diff.md`、`docs/audits/jingtai-basemap.json`、`docs/screenshots/jingtai-p1-basemap.png`、`candidates/jingtai-p1/`、`scripts/diff-jingtai-source.mjs`、`scripts/probe-jingtai-basemap.mjs`；`scripts/prepare-jingtai.mjs` 只为候选抓取加了 `--raw-dir` 参数：开头新增 `arg()` 帮助函数与 `rawDir` 前缀两行（另加一行注释），并把 `rawPath`、`sourcePath` 两行里的字面量 `data/` 换成该前缀，默认值仍是 `data/`，不加参数时行为与 P0 完全相同。撤销 P1：删除上述五项产物与两个脚本、还原 `scripts/prepare-jingtai.mjs` 的这几行即可，正式数据与 P0 结论均不受影响。P1 的探测脚本（zip 中央目录解析、shapefile 流式解压、EPSG:32649 反算、分档比对）按惯例一次性使用后删除，复现步骤已写进 `docs/audits/jingtai-p1-sources.md` 的「复现方式」。
-
-### P1-4～P1-6：以候选方式接入东亚建筑矢量轮廓（2026-09-23）
-
-用户以「先帮我吧景泰小学附近的居民楼复现吧，附近这么多居民楼，怎么什么都没有显示」验收上文解锁条件 1，即接受"作者声明 CC BY 4.0、配套论文写明由高分辨率影像判读、无逐要素来源代码表"的轮廓进入本项目。**接入按候选交付，`public/data/` 与 `data/` 的正式快照逐字节未动**（`tests/jingtai-data.test.js` 里钉住的两组校验和全部通过），合并结果只写 `candidates/jingtai-p1-merge/`。
-
-数据侧从归档取出的近场切片是 `data/jingtai-eastasia-footprints.geojson`（4,361,112 B，SHA-256 `fb478410cf…9cb3`，11,257 条记录、11,245 个 Polygon 与 12 个 MultiPolygon，环全部闭合）；该切片由一次性探测脚本产出，**当时尚未固化为仓库脚本**（2026-10-06 已固化，见下文 P1-4a），合并与校验本身靠本地输入即可复现：`node scripts/merge-jingtai-footprints.mjs`。`src/footprints.js` 的 `normalizeFootprints` 按固定顺序剔除：几何无效 0、2 公里外 2,535、任一顶点落入校园用地面 8、面积 <20 m² 1,789、与既有 OSM 轮廓间距 ≤15 m（以 OSM 为准）2,159、质心相距 <1 m 的重复 0；11,271 个面部件留下 **4,780** 个。合并后 2 公里内 **5,686** 栋 = OSM 906 + 影像轮廓 4,780，分档（OSM／合并）为 100 m 0／**48**、200 m 2／201、300 m 17／348、500 m 156／**772**、1000 m 370／1,828、2000 m 906／5,686。P1-3b 记的 100 m 档 62 个到 48 栋的差来自两条规则（8 个顶点落入校园面、6 个剩余碎屑面积），逐条对账写在 `docs/audits/jingtai-p1-sources.md`。
-
-身份与呈现按计划书底线执行：轮廓 id 为 `eastasia/<序号>`、来源记录为 `eastasia/gz-<记录号>[#p部件号]`，两者都不匹配 `src/main.js` 生成 OSM 链接的 `^(?:relation\/)?\d+$`，因此卡片没有 openstreetmap.org 链接，改为指向 Zenodo 记录页；`src/link.js` 的前缀白名单只放 `relation/` 与 `eastasia/`，`way/1`、`node/1` 一类仍拒绝解析。用途一律 `unknown`，高度一律 `heightSource: 'estimate'` 的 9.6 m 示意，不写任何名称与地址字段，于是 `searchIndex` 按「无名称且无街道即跳过」的既有规则自动把这些轮廓排除在楼名与地址检索之外；地图署名行新增「另有 4,780 个影像推导轮廓 / CC BY 4.0（2023）」，卡片正文注明轮廓来自 2023 年影像判读、用途名称高度均未收录。
-
-取证：`node scripts/audit-jingtai-coverage.mjs` 新增「候选合并」一行，三档产物 48/772/5,686、转换缺失 0；渲染证据 `docs/audits/jingtai-render-p1-merge.json` 由 `EVIDENCE_TAG=p1-merge BUILDINGS_FILE=candidates/jingtai-p1-merge/jingtai-buildings.geojson node scripts/probe-jingtai-render.mjs` 产出（首屏视野内 2,563 栋、近景 1,417 栋，「产物存在但未渲染」0 栋），截图为 [候选合并首屏](docs/screenshots/jingtai-p1-merge-hero.png)、[候选合并近景](docs/screenshots/jingtai-p1-merge-near.png)。点击一栋轮廓的卡片、分享哈希 `#map=…&b=eastasia/3520@…` 在新标签页复现，均已实测。回归为 Node 测试 **261 项通过**（新增 `tests/footprints.test.js` 13 项含 8 类校验注入，`tests/link.test.js` 的链接缺陷注入扩到 5 类）、浏览器套件 **28 通过／2 项数据缺口 fixme／0 失败**、生产构建主包 1,637.69 kB／gzip 438.86 kB（较 P0 +1.52 kB）。
-
-看效果：候选数据当时装在独立预览包里，`http://127.0.0.1:4175/?scene=jingtai`（`npx vite preview --outDir dist-p1merge --port 4175 --strictPort`，5,686 栋），`http://127.0.0.1:5174/?scene=jingtai` 那时仍是正式快照的 906 栋；两条地址的分工已被下一节取代。仍未解决的三条：覆盖率依旧不能评估（缺 `docs/audits/jingtai-reference.json` 独立核对清单）；近场楼全部只有 9.6 m 示意高度这一点没变，且合并后示意高度的楼从 897 栋增到 5,677 栋，属 P2；上游影像条款与 `STATUS` 代码表仍未落地，本轮是按用户决定接入，不代表该层已澄清。撤销（仅本节那一轮）：删除 `candidates/jingtai-p1-merge/`、`docs/audits/jingtai-footprint-merge.md`、`docs/audits/jingtai-render-p1-merge.json`、两张 `jingtai-p1-merge-*.png`、`src/footprints.js`、`scripts/merge-jingtai-footprints.mjs`、`tests/footprints.test.js`、`data/jingtai-eastasia-footprints.geojson` 与 `dist-p1merge/`，再按 `docs/audits/jingtai-p1-sources.md`「撤销」段还原 `src/main.js`、`src/map.js`、`src/link.js` 与两个脚本的行级改动；那一轮没碰正式数据，所以撤销不需要重生成——正式数据的提升与撤销见下一节。
-
-### P1-7：合并结果升为正式数据（2026-09-23）
-
-用户以「升为正式数据」在上一节末尾给出的三条推进方式里选了第一项（另两条是先固化提取脚本、先做 P2 视觉），于是 `candidates/jingtai-p1-merge/` 的合并产物成为 `public/data/jingtai-buildings.geojson`：**5,686 栋 = OSM 906 栋（ODbL）＋影像推导轮廓 4,780 个（Zenodo `10.5281/zenodo.8174931`，CC BY 4.0，2023-04 成图）**。这一节不改写上一节的许可结论——许可链上游与 `STATUS` 代码表仍未落地，本轮是把该风险按用户决定接进正式数据，不是把它判定为已澄清。
-
-提升前先备份：`backup/pre-p1-merge/public/data/` 存三个提升前文件，`backup/pre-p1-merge/SHA256SUMS.txt` 记录校验和（**路径相对项目根，`shasum -a 256 -c backup/pre-p1-merge/SHA256SUMS.txt` 必须在根目录跑**）；本轮实测按备份恢复后三行全部 OK，这条撤销路径是跑过的而不是写出来的。提升命令 `node scripts/merge-jingtai-footprints.mjs --out=public/data` 可重复执行：脚本先从输入里剥掉上一轮并入的轮廓与 `properties.sources` 信封，只用 ODbL 那一层作基线，所以第二次运行是完整重算而非追加，OSM 底仍是 906 栋、校验和仍是 `a7936a92…9075`，产物与已评审候选逐字节相同（`b4bc8c03…4fd3`）。第二来源登记在 `public/data/jingtai-metadata.json` 新增的 `footprintMerge` 段（来源、规则、六类剔除计数、六个分档、基线路径与校验和、两侧高度分布、索引条目数、一句说明），因此 metadata 校验和变为 `ed3d8f28…64f80`；`jingtai-buildings-index.json`、`jingtai-grounds.geojson`、`jingtai-pois.json` 逐字节未动，检索索引仍是 75 条且 0 条指向轮廓。
-
-校验分工随之明确：`validateJingtai` 的语义是「每个要素都能追溯到原始 OSM 元素」，对合并后的正式文件必然报 `Feature has no OSM source: eastasia/…`，所以它只跑 OSM 那一层（`tests/jingtai-data.test.js` 的 `osmFiles` 视图，含那张缺陷注入表），新增层仍由 `validateMergedJingtai` 负责。`tests/footprints.test.js` 的复现测试改为从正式文件剥出 OSM 底再重算，并断言正式产物 === 已评审候选——不剥离会让每条轮廓都被判 `matches-osm`，测试必然通过却什么都没测。本轮三处新断言都做过注入：删掉 `formatCoverageReport` 的 note 行、把注入表改回 `files`、把剥离过滤器改成恒真，三条分别失败。
-
-审计与取证：`scripts/audit-jingtai-coverage.mjs` 的正式行改名「正式快照（public/data，OSM＋东亚轮廓）」，「候选合并」行删除（同一文件审计两遍只多一列，不多证据），并新增一行按产物 `footprintSource` 计数生成的来源说明，挡住「产物 772 栋 vs 原始 157 处」被读成 OSM 快照新增长度；正式行的渲染证据换成 `docs/audits/jingtai-render-p1-live.json`（`EVIDENCE_TAG=p1-live node scripts/probe-jingtai-render.mjs`，不做路由替换，直接探测 5174 上的正式数据：首屏视野内 2,563 栋、近景 1,417 栋，「产物存在但未渲染」0 栋），截图为 [正式数据首屏](docs/screenshots/jingtai-p1-live-hero.png)、[正式数据近景](docs/screenshots/jingtai-p1-live-near.png)；P0 的 `docs/audits/jingtai-render.json` 保留为 OSM 层的证据，测试里 OSM 视图仍以它核对 906 栋、未渲染 0 栋。
-
-新出现的代价：景泰建筑载荷从 368,632 B 涨到 3,207,852 B（gzip 后 61,704→363,137 B），而 dev 与 `vite preview` 都不压缩 `.geojson`，本地首屏就是 3.2 MB 原样传输；计划书 P2 第 6 条「数据显著增多后再评估空间分块和按需加载」由此从假设变成有实测触发条件的一项。帧率侧未见代价：同一套件里 5,686 栋的学校环绕 15 秒提交 900 帧、平均 59.99 fps、帧间隔 P95 17.6 ms、期间额外数据请求 0。看效果只需 `http://127.0.0.1:5174/?scene=jingtai`（正式数据即合并结果，4175 那条独立预览地址与 `dist-p1merge/` 已无对比价值）。
-
-回归：Node 测试 **261 项通过／0 失败**，浏览器套件 **28 通过／2 项数据缺口 fixme／0 失败**（11.7 分钟，两条 fixme 仍是校内操场与校门步行距离，见上文），生产构建主包 1,637.69 kB／gzip 438.86 kB、CSS 113.17 kB／gzip 17.19 kB、Worker 508.48 kB（数据文件走 `public/` 原样拷贝，不进主包，故与候选那一轮同数）。按「重新跑一下测试确认没有回归」复跑两套，结果同向：Node 仍 261／0，浏览器仍 28 通过／2 fixme／0 失败（11.1 分钟），学校环绕段 p95 由 17.6 ms 变 17.5 ms，属测量抖动不是回归。
-
-撤销：在项目根跑 `cp backup/pre-p1-merge/public/data/jingtai-buildings.geojson backup/pre-p1-merge/public/data/jingtai-metadata.json public/data/`，随后 `shasum -a 256 -c backup/pre-p1-merge/SHA256SUMS.txt` 应三行 OK；再同步三处期望，否则测试会拿正式数据去比候选记录——`tests/jingtai-data.test.js` 的 `liveSha256` 两个值改回 `a7936a92…`／`899e2576…`，`tests/coverage-audit.test.js` 正式行的 48／772／5,686 改回 0／156／906 并去掉 `jingtai-render-p1-live.json` 引用，`scripts/audit-jingtai-coverage.mjs` 的正式行标签与 `renderFor` 指回 `docs/audits/jingtai-render.json`。`src/footprints.js`、合并脚本、切片输入与 `candidates/jingtai-p1-merge/` 可以整批留着，不接正式数据时它们只是候选产物、不进运行时。
-
-### P1-4a：把那份近场切片的提取固化成脚本（2026-10-06）
-
-P1-4 那一节留了一句"该切片由一次性探测脚本产出，**尚未固化为仓库脚本**"，于是正式数据里那 4,780 栋影像轮廓在仓库内无法再生。这一节补上 `scripts/extract-eastasia-footprints.mjs`：读 Zenodo 那份 23.1 GB 归档的 zip 中央目录 → 按 Range 取 `China/Guangdong/Guangzhou.{prj,dbf,shp}` 三个成员 → 解 shapefile 与 dBASE → EPSG:32649 反算 → 按 ±2 km 盒筛 → 写切片。默认**不覆盖**仓库里那份切片（它是 `src/footprints.js` 与正式快照的上游输入），产物落在 `.cache/eastasia/regenerated.geojson`，要替换得显式 `--write`。
-
-**四条判据与一次降级。** Node 侧新增 `tests/eastasia-extract.test.js` 9 项（合成 .shp／.dbf 夹具、UTM 正反算闭合、环分组与"先闭合再反转"、三条近场盒口径、`pyDumps` 的分隔符、以及**拿仓库那份切片自己当对照物**：11,257 条、身份严格递增、外环全逆时针、25 个洞全顺时针、`rings` 与环数逐条相等、坐标不超 7 位小数，并把输出规则反照回去验可逆性）。网络那一段没有可断言语义，所以不进判据。
-
-**逐字节一致这一条按事实改了口径。** Zenodo 当天限速到约 13 KB/s，整份 .shp（压缩 126,024,029 B）要两个多小时，于是给脚本加了 `--prefix`：按 deflate 的同步冲刷把**已落盘那一段**解出来（2026-10-06 21:20 那次是 67,108,864 B 压缩 → 137,321,124 B .shp，占声明值 261,559,312 B 的 52.5 %，扫到记录号 1~917,176），先对能对的账。结果：号段内切片有 4,708 条、脚本留下 **4,708 条**（Polygon 4,700 / MultiPolygon 8，盒的口径 `vertex-box ±2000 m` 因此被证实），身份、四个属性字段、几何类型、环数、每环点数**逐条一致**；67,686 个坐标值里 2,413 个（3.6 %）不同，且**最大差恰好是 1e-7 度（约 1.1 cm）**——即末位进位差，不是几何或口径差。换用 pip 的 `utm` 0.9.0 与 pyproj 3.8（PROJ）在**同一个 4,708 条样本**上各跑一遍，末位差分别是 2,468 与 2,561 个值，都比本脚本的 2,413 多，最大差同样是 1e-7°，所以当年那份一次性脚本走的是**第四种浮点路径**，而它已不在仓库里。结论写在这里而不是藏起来：**结构与选择可复现、坐标可复现到 1 cm，整文件逐字节一致不可达**。
-**全量核对已跑完（2026-10-07，`.shp` 261,559,312 B 全部落盘后 `node scripts/extract-eastasia-footprints.mjs --verify`）**：切片 11,257 条、脚本留下 **11,257 条**（Polygon 11,245 / MultiPolygon 12），双向 id 差 **0**、属性与环结构差 **0**，155,528 个坐标值里 **5,554 个（3.6 %）** 差在末位、最大差仍是**恰好 1e-7°（约 1.1 cm）**——前缀模式那一份 3.6 %／1e-7° 的比例与量级在全量上原样复现。退出码按"有任何差就给 1"设计，所以这次是 1，不是回归。
-
-**顺带修掉的四处实现错**（都是真归档或新判据抓出来的，不是重构）：① ESRI 的 `Parts` 数组只有 `NumParts` 项、**没有终止项**，按 `+1` 读会让每条记录的点数组往后错 4 B；② MultiPolygon 还有一张 `PartTypes`（钉书针）表，漏算就读到整数表；③ 文件头偏移 32 是**整文件的形状类型**，不是字节序标记，拿它等 1 会把每份真 shapefile 判成坏文件；④ 子午线弧长 M(φ) 的三条 sin 项符号是交替的，而反算必须带底点纬度 φ₁ 那一段级数——两处都错过一次，合起来让广州塔附近偏到 0.1°（约 12 km），正反算不闭合时才露出来。另有一处缓存正确性 bug：解完压把 `.deflate` 直接改名成正式文件，于是缓存里躺的是压缩字节、每次重下且 `.prj` 读回乱码。
-
-**还有一条自我更正**：写测试时按记忆给过一条"45°N 子午线弧长 = 4,995,985 m（公开常数）"的断言，被这条判据自己抓出来是错的（真值约 4,984,965 m）。UTM 那一项因此**不放任何记忆里的常数**，只钉三条定义性事实（中央经线东距恒 500 km、赤道北距恒 0、经纬单调）＋闭合精度，绝对口径交给 `--verify` 拿切片当对照物。
-
-**取回的三份成员与归档自证**：`.prj` 逐字声明 `PROJCS["WGS_1984_UTM_Zone_49N",…]`；`.dbf` 四列 `id / ORIG_OID / STATUS / ORIG_FID`、1,792,111 行（切片里那个 `dataset_id: "6393.00000000000"` 就是 `id` 列的**原文**，所以脚本不解析数字，否则变成 `6393`）；`.shp` 解压 261,559,312 B 与中央目录声明逐字节相等、CRC32 相符。缓存目录 `.cache/eastasia/`（约 350 MB）在仓库内、`public/` 之外，构建收不到，可随时整目录删掉重取。
-
-**撤销**：删 `scripts/extract-eastasia-footprints.mjs`、`tests/eastasia-extract.test.js` 与 `.cache/eastasia/`。正式数据、`data/jingtai-eastasia-footprints.geojson`、`src/footprints.js` 与合并链一行未动。
-
-### 近场分组：同组选择（历史阶段，2026-09-23）
-
-本节记录第一阶段；当前普通视图已改为下节的连续体块，不再逐栋绘制。
-
-用户提出「附近建筑都没有名字，也不用搞这么细，一个小区为一栋建筑就行」。两句话指向两类不同的问题。名称缺失是来源覆盖问题：正式快照 5,686 个要素只有 74 个带 `name`，且全部来自 OSM 那一层，影像推导的 4,780 个轮廓 0 个有名；500 米近场 773 栋里仅 2 栋有名；23,492 条原始要素中不存在任何 `landuse=residential` 或 `place` 边界，也就是说本数据集里没有可用于命名小区的外部界线。按外观猜名等于伪造来源，不采用。粒度问题是表达层的：轮廓按 OSM 与影像各自的最小单元给出，一个小区在图上就是十几到几十栋并排独立的楼块。本轮只解决第二条。
-
-归组规则写在 `src/groups.js`，只作用于显示与交互层。两栋轮廓边到边 ≤ 25 米即合并（`footprintGap` 取两侧顶点到对方边线的最近距离，接触或包含记 0），合并后整组外接跨度 > 150 米则拒绝这次合并；候选边按最短间隙优先、同间隙按来源 id 定序，所以同一份快照无论要素以什么顺序到达都得到同一个划分。跨度上限是规则的组成部分而不是调参余量：只按 25 米单链合并会把 500 米近场并成一个 577 栋的组，那描述的是一条街而不是一个小区。校园用地与参数化塔身不参与归组——前者本就是一整块用地、后者是单一模型，且院落轮廓会被四周楼块连成一片。
-
-实测：正式快照 5,686 栋一次划分为 **1,062 组**，其中 295 组只含一栋、767 组含多栋，最大一组 53 栋，所有多栋组跨度不超过 150 米，整场计算 407 ms（Node 侧测量，一次性）。按最近边 500 米的近场口径，773 栋落进 **115 组**，最大一组 36 栋。
-
-接入方式：`src/map.js` 只在学校场景归组，整场一次算完并缓存，通过 `setTimeout` 延后执行（不保证在首帧之后），首次点击若还没算完就同步补算，避免「第一次点没分组、第二次点才有」的口径漂移。代价实测：浏览器内整场一次 248 ms、得到同样的 1,062 组（Node 侧 407 ms），是加载后的一次性长任务，不随点击或每帧重复。高亮仍走 `building-selection` 源，只是由一栋换成整组，组内每栋保留自己的 `height`／`base`，高度模式下估算高度那部分仍按平面轮廓画。卡片挂点、遮挡评分、Esc 关闭和地址栏 `b=` 深链全部继续按被点击的那一栋计算，分享链接不会因为归组而指向一组楼。透视镜按用途或高度来源过滤时，高亮与卡片数字都只统计当前真正画出的那部分成员。`src/main.js` 在单栋信息之后追加两行：「同组 N 栋（OSM x · 影像 y）· 合计占地 … m²」与「归组只看邻接：边到边 ≤ 25 m、整组跨度 ≤ 150 m，轮廓未合并」，后者在组内有名称时附「组内名称：…」，名称一律取自要素自身，不推测。截图：[全场最大一组 53 栋（现为连续体块截图）](docs/screenshots/jingtai-group.png)。
-
-数据未动：`public/data/` 五个文件逐字节不变，`jingtai-buildings.geojson` 校验和仍是 `b4bc8c03…4fd3`，几何未合并、未平滑、未简化，`properties.distance` 等字段语义不变；`node scripts/audit-jingtai-coverage.mjs` 重跑后 `docs/audits/jingtai-coverage.md` 与重跑前版本逐字节相同（脚本不写时间戳），所以分区口径与数字不受影响。
-
-测试：新增 `tests/groups.test.js` 8 项（阈值两侧、跨度上限、校园与塔身排除、乱序输入划分一致、组内统计、未知 id 与缺中心报错、正式快照 1,062 组／近场 115 组等实测计数），`tests/link.test.js` 新增 2 项跑真实的 `selectFeature` 切片：一项断言整组 outlines 为 53、卡片挂点几何与 `selection.osmId` 仍是被点那一栋、学校场景以外不附分组；另一项用一份近场混合组（17 栋住宅＋1 栋公共，`893915142`／`893915147`）证明过滤掉的那栋既不在高亮里也不在卡片数字里（18→17、合计占地 2,797→2,491 m²），且只剩一栋可画时卡片不再提分组。六处缺陷注入分别让对应断言失败：去掉跨度上限、让校园参与归组、去掉「按最短间隙优先」的排序、卡片不携带分组信息、高亮只画被点那一栋、去掉「只统计真正画出的成员」的过滤（该条报 expected 17 / actual 18，其余 23 项仍通过）。广州塔场景另加一条「卡片不出现同组行」的反向断言。浏览器侧新增 1 项深链选择验收（整组 53 栋高亮、Esc 后归 0）；当时该项尚未执行鼠标点击。
-
-回归：Node 测试 **271 项通过／0 失败**（133 顶层 + 138 嵌套），生产构建主包 1,643.25 kB／gzip 440.96 kB（较上一轮 +5.56 kB／+2.11 kB gzip，就是归组模块与卡片两行；数据文件走 `public/` 原样拷贝，不进主包）、CSS 113.17 kB／gzip 17.19 kB 与 Worker 508.48 kB 不变，产物 `dist/assets/index-C7eTjlM2.js` 内可查到 `归组只看邻接` 与 `maxSpanMeters`，说明归组不是只有测试在引用。浏览器全套 31 项 **27 通过／2 项数据缺口 fixme／2 失败**（25.2 分钟）：两条失败同为「`#places-toggle` 等 60 秒仍是 disabled」，且都停在测试公共前置 `openMap()` 上、没进本轮任何新代码；单独重跑分别 7.5 秒与 3.6 秒通过，命令行直连底图样式端点三次 200（0.6～0.9 秒），当时记录到本机负载（`vm.loadavg` 3.1～3.7、`mediaanalysisd` 约 83% CPU），但这些记录与复跑通过不足以确定失败根因，也不能单独排除代码问题；没有修改超时值。学校场景整册通过（含本轮新增的整组验收与四站导览）；帧率侧学校环绕 15 秒提交 **900 帧、59.995 fps、帧间隔 p95 17.5 ms、额外数据请求 0**，与分组前基线 59.994 fps／17.5 ms 同数。归组自身的浏览器代价实测一次性 **248 ms** 长任务、同样得到 1,062 组；广州塔五分钟段在负载回落后的单独清洁跑里为 300,012 ms／17,995 帧／p95 16.7 ms／p99 16.8 ms／最长帧 33.4 ms／期间额外请求 0／页面异常 0。公共底图与本机负载的可用性仍不作保证。
-
-撤销：删除 `src/groups.js`、`tests/groups.test.js`、`docs/screenshots/jingtai-group.png` 与本节；还原本轮在 `src/map.js`（`setOutline` 改回只收单 feature、`selectFeature` 去掉 group 分支及其后三个辅助定义、`showBuilding` 的 outline 取值、`if (school) setTimeout(computeGroups, 0)` 一行与 `groups.js` 导入）、`src/main.js`（`groupFacts` 与卡片追加行）、`tests/link.test.js`（harness 的 `school`／`groupBuildings`／`groupStats`／`DEFAULT_CENTER` 形参、`activeLens` 形参与 `lens` 默认值、新增用例与两条导入）、`tests/browser.spec.js`（一条反向断言）、`tests/jingtai.browser.spec.js`（新增用例）的改动。正式数据、备份与审计产物无需任何还原动作——本轮没有改它们。
-
-### 连续体块：整组只画一个形状（2026-09-24）
-
-用户明确要求「模块连在一起……像小区什么的，一个形状就行」，并授权开始实现。学校场景的普通用途视图现在把每个多栋组绘制为一个连续、实心的外包络体块，远景与近景都不拆回散楼；原有 5,686 个要素显示为 1,062 个形状，其中 767 个是多栋合成形状、295 个保留单栋几何。校园不参与合成，广州塔场景不加载该图层。
-
-`src/groups.js` 的 `groupShape` 用凸包包住所有可见成员的外环，**不是多边形真并集，也不是真实小区边界**：楼间空隙、院落与凹口会填平，不能据此推断道路或用地产权。没有新增依赖、没有重抓来源或猜名称。合成体块统一 9.6 m 示意高度，单栋保留原有属性；高度模式仍用原始逐栋轮廓，未知高度仍只画平面。统计面积是原楼块面积之和，不是外包络面积。
-
-`src/map.js` 的 `school-building-groups` 源与图层只用于普通模式，原散楼层在该模式隐藏。用途过滤先移除不匹配成员再生成外包络，只有一栋时恢复该栋原始几何；切换氛围沿用用途色和距离渐淡。组划分在初始化时计算一次，各用途显示结果缓存；不在每帧重复计算。卡片与高亮使用合成形状，选中层与主形状采用一致的瓦片简化设置，避免边缘错位。搜索或分享可定位组内任意原始成员：地址栏仍保存该成员的真实 ID 与原轮廓内部点，不能把组代表成员偷换成用户搜索的对象。卡片标题为「相邻建筑群」，有名称时注明定位成员，OSM 链接明确只指该成员；影像成员不生成 OSM 链接。
-
-验收包含原楼间空隙的真实鼠标点击、13/18 级缩放不拆散、单一高亮、多栋到单栋的用途过滤、高度视图往返、夜景配色、非代表成员与 relation 分享、手机横竖屏和广州塔隔离。几何单测覆盖闭环、连续性、乱序稳定、输入不变、洞与 MultiPolygon、过滤后边界、5,686 个成员完整映射；内存缺陷注入检查去掉 groupId 匹配、返回错误成员、拆回多份高亮、遗漏显示轮廓。本轮 Node 测试 **290 项通过／0 失败**，生产构建通过（主包 1,647.03 kB／gzip 441.98 kB）；浏览器整套 32 项**首次运行即全部通过／0 失败／2 项既有数据缺口 fixme**（12.5 分钟，学校环绕 59.993 fps、五分钟段 17,994 帧／p95 16.8 ms）。
-
-看效果：`http://127.0.0.1:5174/?scene=jingtai`，截图见[首屏](docs/screenshots/jingtai-desktop.png)、[53 栋合成一个形状](docs/screenshots/jingtai-group.png)。正式快照文件不改写；过去的逐栋渲染审计截图是历史证据，不能拿来代表当前体块画面。
-
-撤销本轮可回到上一节的同组选择：保留 `groupBuildings`／`groupStats`，移除 `groupShape`／`groupDisplay`；在 `src/map.js` 移除 `school-building-groups` 源、图层、缓存及可见性切换，普通模式恢复原楼块层，选择高亮恢复 `members.map(selectionOutline)`，卡片挂点恢复原 `outline`；在 `src/main.js` 去掉合成群卡分支并恢复普通模式说明；同步还原本轮对应测试契约。无需恢复或重新生成 `public/data`，也不要删除上一阶段的归组逻辑。
-
-### 建筑群名称：高德地点快照只在本机开发里出现（2026-09-24）
-
-用户追问「为什么附近的建筑都没有名字」。名称无法来自现有两层数据：OSM 快照里 767 个合成体块对应的成员几乎没有 `name` 标签，高德只给**点**（住宅小区 POI 的经纬度）不给边界。因此本轮做的是「用高德的地点点，按距离与包含关系推断到已有的凸包上」，产出的是**推断名称**，不是官方小区名，也不是 OSM 标注。
-
-`scripts/prepare-amap-names.mjs` 一次性离线取数：按 1,062 个组的中心切成 93 个瓦片请求串行调用 `types=120300`（住宅小区），间隔 650 ms、命中 `10021` 限速即退避重试，共返回 937 条地点，落在学校 2 公里范围内的保留 427 条，写出 `data/jingtai-amap-names.json`（69,539 字节）。坐标从 GCJ-02 经 `src/coords.js`（MIT 授权的 coordtransform 算法）反解为 WGS-84，广州地区偏移量级约 620 m，自检方式是拿校园自身中心比对：解算后与 OSM 中心相差 2 m。
-
-`src/names.js` 的 `nameGroups(shapes, places, { maxMeters = 40 })` 保留包络内地点，以及距包络**边缘**不超过 40 m 的外部地点；先按包络内优先，再按到包络中心的距离、地点 id 排序。40 m 不是中心距离限制，外部候选也不保证选中距边缘最近的一个。实测：767 个合成体块中 438 个获得推断名（57.1%），其中 197 个由包络内地点命名、241 个由包络外地点命名；共 306 个不同名称，其中 109 个名称对应多个体块，不能把名称当作组的唯一标识。该匹配在点击时跑一次，历史实测 **0.28 ms**。
-
-授权与本机边界：高德数据许可查询、不可再分发，因此快照**放在 `data/`，不在 `public/`**，由 `vite.config.js` 的 dev 中间件按文件名白名单（当前只有 `jingtai-amap-names.json`）伺服 `/local/<name>`，非白名单路径与生产构建都不提供。`src/main.js` 的预取包在 `if (isSchool && import.meta.env.DEV)` 内，`loadAmapPlaces` 在缺文件、非 2xx、超时（10 s）与 JSON 解析失败四条路径上都返回 `null`，页面静默降级为原来的「相邻建筑群」标题。构建产物已复核：主包 1,647.03 kB／gzip 441.98 kB 内查不到 `/local/` 与 `jingtai-amap` 字样，`dist/data/` 里没有该快照，`dist` 全文无 key，`/local/jingtai-overpass.json` 在非白名单下返回 404。key 只存在于 `.env.local`，不进任何命令、日志或源码；**若将来要对外发布，先在高德控制台删除或轮换该 key**。
-
-测试：`tests/names.test.js` 8 项覆盖包含优先、距离次序、40 m 阈值两侧、id 兜底稳定、缺字段地点过滤、快照缺失降级、坐标反解与正式快照计数；六处缺陷注入分别让对应断言失败，其中「去掉包络内优先」这一项在补入薄长矩形用例前一直存活——正方形凸包下两种排序结果相同，注入测不出差异。浏览器侧三项验收推断名上卡（`白云区少年宫`）、推断名副标题与来源行、附近无地点时保留「相邻建筑群」，以及一项把 `/local/…` 路由到 404 的降级验收（同项断言 `data/` 有文件而 `public/data/` 无副本）。名称卡片明确标注「取自高德『住宅小区』地点，属推断而非标注」。
-
-顺带修掉一个真实缺陷：MapLibre 的 `Popup._focusFirstElement` 直接 `focus()` 关闭按钮，浏览器随之滚动 `overflow:hidden` 的 `#map` 容器——568×320 极矮横屏上合成卡比屏还高，被滚走 45 px；挂点循环量的是这个滚动中的帧，点击结束时容器已回到 0，于是量出来「贴底」的座位实际落到屏外 45 px。修法是新开 `focusAfterOpen: false` 并在 `attach` 里 `close.focus({ preventScroll: true })`，键盘仍能落进卡片而地图不滚。注入验证：还原成不带 `preventScroll` 的 `focus()` 后，568×320 断言立刻报 `right 657 > 568`。上一轮为此临时加的 `clampIntoView()` 已随之删除，因为它量的是同一份会被撤销的坐标。
-
-横屏遮挡已修复（2026-09-24）：568×320 上，MapLibre 的缩放／指南针组曾绘制在卡片上方，挡住「柯子岭长安大街十巷6号楼」标题。现按用户确认的取舍，在现有 568～1000 px 宽且高度不超过 500 px 的断点内，卡片打开时只把 `.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group` 设为 `visibility: hidden`；关闭或转出该断点自动恢复。保留控件占位，不改变卡片挂点测量；隐藏按钮不能接收键盘焦点，署名入口始终保留。所有视口的 `.maplibregl-popup` 统一设为 `z-index: 2`，高于介绍区的 1、低于顶栏的 3，修复转屏后「查看完整范围」按钮和竖屏介绍文字穿到卡片上方的问题。两条规则对两个场景的建筑与地点卡片一致生效，开卡期间仍可用地图手势缩放。
-
-验收先在未修复样式上复现 `568x320: title must not be covered` 失败；首轮相关双场景回归 7 通过／1 失败，失败项为新增的转屏后标题检测。独立复跑仍失败，逐点命中记录确认遮挡者是 `#overview-button`，连续两帧位置不变，不归因于等待时机。补正弹层层级后，单项通过。新增标题 12 点命中检测、开卡隐藏、横竖屏往返、关闭按钮／Esc 退出后真实点击放大；转屏先等待地图画布尺寸更新再检查。缺陷注入分别恢复旧缩放组与弹层层级、单独还原转屏后的弹层层级，标题与隐藏状态断言均能识别，`finally` 移除注入后恢复。Chrome 实测隐藏按钮不能夺走关闭按钮焦点，署名仍可见；关闭后实际放大从 16.8 到 17.8。最终两条样式下，相关双场景浏览器回归 **8/8 通过**（1.6 分钟），Node **290/290 通过**，构建通过（CSS 113.29 kB／gzip 17.21 kB，JS 1,647.03 kB／gzip 441.98 kB，既有大包提示保留）；本轮未重跑五分钟压力段，不能将此前整套回归当作本轮结果。横竖屏截图均已重新检查，标题与卡片眉标不再叠上介绍区文字。
-
-看效果：`http://127.0.0.1:5174/?scene=jingtai`，修复后卡片见[390×844](docs/screenshots/jingtai-group-390.png)与[568×320](docs/screenshots/jingtai-group-568.png)。
-
-仅撤销横屏修复：① 删除 `src/style.css` 横屏断点内含 `body[data-card='open']` 和 `visibility: hidden` 的规则，以及基础样式中的 `.maplibregl-popup { z-index: 2; }`；② 从 `tests/jingtai.browser.spec.js` 的小屏循环移除新增的导航可见性、标题命中、缺陷注入、转屏及关闭后缩放检查，恢复原来的截图后按 Esc 关闭；③ 按原样式重生成两张 `jingtai-group-390.png`／`jingtai-group-568.png`，移除此处横屏修复与验收说明。无须改名称快照、卡片挂点逻辑或任何 key。
-
-撤销按项来：名称侧删除 `src/names.js`、`scripts/prepare-amap-names.mjs`、`tests/names.test.js`、`data/jingtai-amap-names.json` 与本节，还原本轮在 `src/main.js`（推断名分支与 `import.meta.env.DEV` 预取）、`vite.config.js`（`/local/` 白名单中间件）、`tests/jingtai.browser.spec.js`（三项名称验收与降级用例）的改动，`.env.local` 里的 `AMAP_KEY` 请自行在高德控制台删除或轮换；`focus({ preventScroll: true })` 与 `focusAfterOpen: false` 修的是真实滚动缺陷，即使回退名称功能也建议保留，回退它需同时确认 `clampIntoView()` 的缺失会重新暴露 45 px 溢出。
-
-### 默认镜头 pitch 48°→58°：把沙盘体积放进画面（2026-09-26，历史阶段）
-
-上一步交付后先回答了「为什么景泰和广州塔的 3D 效果差这么多」，随后要求「调整默认镜头的pitch看看效果」。本步只改景泰英雄镜头一行常量：pitch 从 48° 抬到 **58°**（与项目自己的环绕镜头同角），并按视口补偿 zoom——桌面 16.35→**16.65**、手机 16.55→**16.7**、极矮横屏 16.1→**16.45**，bearing 仍为 0（正北）。快照、归组、-15° 规整、示意厚度规则、广州塔镜头一律未动。
-
-pitch 不能单独抬：只改角度会把校园投影压扁，实测 1440×960 在 58°／16.35 下包围框高从 75 px 掉到 **59 px**、390×844 在 58°／16.55 从 86 掉到 **68**、568×320 在 58°／16.1 从 63 掉到 **50**，三档都直接破掉上一轮定的「包围框高 >70 px（横屏 >60）」构图判据。补偿后的实测包围框：1440 与 1024 为 **144×73**（原 117×75）、844／667／568 为 **126×64**（原 98×63）、390／320 为 **149×76**（原 134×86），七档视口校园与校名全部在屏内且与说明文字、控件保持间距（最紧的是 568×320 的 6 px 与 667×375 的 10 px，判据下限 4 px）。
-
-体积收益用「同一镜头、开高度与把 `school-building-groups` 的 `fill-extrusion-height` 置 0 各截一张图」的逐像素差来量，即只因体块有厚度才出现的像素占整幅画面的比例：1440×960 由 **25.38% 升到 49.11%**，390×844 由 **22.94% 升到 41.59%**。青绿校园顶面的可见像素（按填充色精确匹配）不降反升：1440 3,157→6,208（+96.6%）、1024 3,170→6,206（+95.8%）、844 2,379→4,504（+89.3%）、667 1,643→2,133（+29.8%）、568 881→1,321（+49.9%）、390 4,152→6,669（+60.6%）、320 4,177→4,461（+6.8%）——上一步在手机上多遮住的那约两成校园顶面，本步由镜头补偿全部拿回。该度量是顶面颜色计数，不是 GPU 逐像素遮挡判定。
-
-代价是首屏看到的地面范围变小：同一屏幕行（0.75×视口高）左右端点之间的地面距离，1440 由 1.04 km 降到 **0.79 km**（-24%）、1024 0.74→0.56、844 0.81→0.62、667 0.65→0.49、568 0.56→0.43、390 0.25→0.22、320 0.20→0.17 km。「更大的连续街坊」在默认镜头里让位给体积与层次，要看完整 2 公里仍需点「查看完整范围」。连带一个改善：环绕按钮原本把镜头从 48° 抬到 58°，现在英雄镜头已是 58°，点「环绕」只剩 zoom 从 16.65 走到 16.7（环绕一直复用 mobileZoom／landscapeZoom，不取桌面 zoom），镜头跳动比上一步更小。
-
-契约同步三处：`tests/scenes.test.js` 的 camera `deepEqual`，以及六项镜头缺陷注入（桌面 zoom、mobileZoom、landscapeZoom、景泰 pitch、景泰 bearing、广州塔 pitch 各一项，每项要求源码里恰好命中一处）；`tests/jingtai.browser.spec.js` 的 `assertHero` pitch 判据与注入、`assertComposition` 的分视口 zoom 判据。新增一条真实观察：MapLibre 构造镜头后 `map.getPitch()` 在七个视口都返回 **58.00000000000001**（48° 时是精确值），属库内部镜头运算的浮点表示，因此英雄判据写成 `toBeCloseTo(58, 10)`——容差 5×10⁻¹¹ 度，注入 48° 仍被拒绝，任何真实镜头差也过不了。
-
-回归结果首跑与复跑分开：Node 全量首跑 **363/363 通过**（81.0 秒），0 失败／跳过。景泰浏览器完整套件首跑 **18 通过、0 失败、2 项既有数据缺口跳过**（4.0 分钟），含 15 秒环绕 899 帧、59.9 fps、间隔 P95 17.3 ms、新增数据请求 0、页面异常 0。广州塔**完整套件**（非子集）首跑 **19 通过／1 失败**（10.6 分钟），失败项 `searching a name or an address…` 停在实时 Overpass 地点列表 70 秒内一个 `.poi-item` 都没出现，而同一次运行里第 4 项走的正是同一条实时地点链路、47.2 秒通过；本步未改广州塔任何常量与共享代码，判定为外部查询未响应，单独复跑该项 **39.9 秒通过**。这不是 GPU 帧率或内存泄漏证明。
-
-画面已实际查看：1440 白昼／日落／夜景、390×844 与 568×320 白昼、合并组卡、568 校园构图专项，均另存为 `jingtai-camera-*`；上一镜头的 `jingtai-height-*` 保留作该步记录。其余视口与主题未逐张目视，但构图判据逐档打印过包围框尺寸、屏内状态与到说明文字／控件的最小间距。体块侧面与街道凹槽在默认镜头里第一次成为画面主体，青绿校园仍是唯一色块、校名未被压住。构建通过（JS 1,654.09 kB／gzip 444.65 kB，CSS 113.70 kB／gzip 17.25 kB，与上一步同报告值，既有大包提示保留）。扫描全部 13 个构建文件：`AMAP_KEY`、`restapi.amap`、`jingtai-amap`、`/local/` 命中均为 0；bundle 内 20 处 `amap` 全部是 maplibre 着色器名 `alphamap_fragment`／`alphamap_pars_fragment`；9 条 32 位十六进制串全是来源校验和片段，无密钥字节。正式建筑、grounds、metadata、道路的 SHA-256 前缀仍为 `b4bc8c03`、`66c9f6a6`、`ed3d8f28`、`3c20d9ad`，来源数据逐字节未变。本轮没有发布。校园操场轮廓与真实步行距离仍未满足，不算通过。
-
-当前截图：[白昼](docs/screenshots/jingtai-camera-day.png)、[日落](docs/screenshots/jingtai-camera-sunset.png)、[夜景](docs/screenshots/jingtai-camera-night.png)、[2 公里总览](docs/screenshots/jingtai-camera-overview.png)、[合并组卡](docs/screenshots/jingtai-camera-group.png)、[校园 1440 白昼](docs/screenshots/jingtai-camera-campus-1440-day.png)、[校园 390](docs/screenshots/jingtai-camera-campus-390-day.png)、[校园 568](docs/screenshots/jingtai-camera-campus-568-day.png)、[校园夜景](docs/screenshots/jingtai-camera-campus-1440-night.png)。预览：`http://127.0.0.1:5174/?scene=jingtai`（无 hash 地址才使用新默认镜头；已有分享地址仍保留自己的镜头）。
-
-逐项撤销：① `src/scenes.js` 第 11 行的 camera 恢复为 `{ zoom: 16.35, mobileZoom: 16.55, landscapeZoom: 16.1, pitch: 48, bearing: 0 }`；② `tests/scenes.test.js` 第 22 行的 `deepEqual` 回到同一组旧值，第 91 行五项注入串分别改回 `'zoom: 16.35'`、`'mobileZoom: 16.55'`、`'landscapeZoom: 16.1'`、`'pitch: 48'→'pitch: 57'`（bearing 与广州塔两项不变）；③ `tests/jingtai.browser.spec.js` 第 89 行恢复 `expect(s.pitch).toBe(48)`、注入项恢复 `{ ...s, pitch: 57 }`、`assertComposition` 的 zoom 判据恢复 `landscape ? 16.1 : s.width <= 760 ? 16.55 : 16.35`、截图前缀恢复 `jingtai-height-` 并移除 `jingtai-camera-*`；④ 不改快照、密钥、依赖、45／280 m 归组、-15° 规整与上一步的示意厚度规则，撤销后 472 个形状与 5,686 个成员的映射、9.6–24 m 厚度分布保持原样。本步完成后暂停。
-
-### 沙盘高度层次：按体块短边的示意厚度（2026-09-26，历史阶段）
-
-上一步交付后确认「效果没问题，继续优化建筑高度」。核对来源后事实是：5,686 个要素里只有 **4 个带 OSM 高度标注**（`327011155` 30 m、`371444595` 24.5 m、`1280134379` 37.1 m、`1280134381` 36 m）、**5 个按层数换算**（`322638155` 1 层 3.2 m，`1280134382`～`1280134385` 各 12 层 38.4 m），其余 5,677 个高度未知；校园 500 m 内的 **773 个成员全部无高度**。因此本步没有补出真实楼高，只把「所有合并体块一律 9.6 m」换成按体块平面尺寸推导的**沙盘示意厚度**。
-
-`src/block-layout.js` 在 -15° 规整与尖长精修完成后，用最终米制包围盒的短边计算：厚度 = 短边 × 0.24，夹在 **9.6–24 m**，按 0.1 m 取整；多栋组和「按层数估算」的体块取 `base + 厚度`，带高度标注或层数换算的单栋继续取来源高度。结果写成新的**仅渲染字段** `displayHeight`，`height`／`base`／`heightSource`／`levels` 一律不改。实际分布：472 个显示形状（378 组 + 94 单栋）中 **471 个使用示意厚度，跨度 9.6–24 m、105 个不同取值**，107 个落在 9.6 m 下限、172 个顶到 24 m 上限；近场 55 个形状同样跨满 9.6–24 m（28 个取值、9 个下限、17 个上限）。唯一以来源高度绘制的单栋 `322638155` 保持精确 3.2 m。本数据集内所有组体块 `base` 均为 0，规则仍保留 `base` 偏移。
-
-高度模式、用途统计、搜索身份、分享地址、广州塔全部不变：高度模式继续按来源高度分档、未知只画平面轮廓，`neighborhood-buildings*` 与广州塔仍用 `['get', 'height']`。已知取舍：4 个带标注高度和 4 个 12 层换算的要素落在合并组内，组形状不借用某个成员的高度当作整组事实，所以它们在普通视图最高只画到 24 m 示意厚度，真实值仍由高度模式、统计和卡片按来源显示。
-
-界面文案随之改口：图例为「模型厚度 9.6–24 m，非实际楼高」；单栋卡写明「高度未标注；模型厚度 X m（按体块短边设置），不代表实际楼高。」；合并组卡报该组实际使用的厚度（示例 56 栋组为 17.4 m）。选中描边与卡片半透明轮廓同步改用 `displayHeight`，高亮不再与模型错位。
-
-测试判据按独立来源写：`tests/block-layout.test.js` 用「短边 ≤40 m 取下限、≥100 m 取上限、中间线性」的分段边界复算，加上 8 类源码缺陷注入（系数、上限、下限、改用长边、丢 `base`、覆盖来源高度、已知高度被改写、取整方式）；`tests/groups.test.js` 用同一规则的另一种分段写法从最终几何反算短边，并新增常量厚度、未夹取两项运行时篡改。首跑记录分开：block-layout **54/56**，`rounding` 变异存活，原因是 61.3 m 夹具在 `round`／`floor` 下同为 14.7，属夹具不具区分度，补 61.5 m 用例后 **56/56**；groups **3 项失败**，因共享的严格属性比对把派生字段与来源字段混在一起，改为来源字段严格相等 + 派生字段独立判据后通过；另有 1 项因父用例内漏写 `await` 被标记 `cancelledByParent`，补齐后 **27/27**。Node 全量首跑 **363/363 通过**（83.1 秒），本轮结束时复跑再次 **363/363**（78.4 秒），0 失败／跳过，未放宽任何判据。
-
-`tests/jingtai.browser.spec.js` 完整首跑 **18 通过、0 失败、2 项既有数据缺口跳过**（4.0 分钟）。新增正向判据：471 个模型化形状厚度最小 9.6／最大 24／105 个不同取值，已知高度单栋 `displayHeight` 精确等于来源高度，图例含新文案且不再含「合并体块高」；运行时注入「绘制来源高度」「厚度压平为 9.6」「把示意厚度写回 height」均被同一判据拒绝，恢复后重新通过。广州塔**完整套件**（非仅相关六项）本轮 **20/20 通过**（10.0 分钟），含五分钟段：300,008 ms、30 次操作、17,999 次渲染事件、间隔 P95 16.7／P99 16.8 ms、最长 33.3 ms、JS 堆 61.4→92.1 MB、新增数据请求 0、页面异常 0；这不是 GPU 帧率或内存泄漏证明。
-
-画面已实际查看：三主题与 1440／1024／390／320／568／667／844 视口、合并组卡、校园构图专项，均保留 `jingtai-height-*` 截图。体块侧面与层次已拉开，青绿校园仍是画面唯一色块、校名未被压住。逐像素统计校园顶面（按填充色精确匹配）可见面积：568 横屏 1,455→1,313 px（-9.8%）、390 竖屏 5,278→4,227（-19.9%）、320 竖屏 5,324→4,251（-20.2%），投影包围框 568 保持 54×58 px、390／320 由 128×83 变为 122×83。即变厚体块在手机上确实多遮住约两成校园顶面，本步接受该代价以保持高度层次；该度量是顶面颜色计数，不是 GPU 逐像素遮挡判定。本步未改镜头、归组与精修规则，只回退厚度只需下列 ①～③ 三项源码改动。
-
-构建通过（JS 1,654.09 kB／gzip 444.65 kB，CSS 113.70 kB／gzip 17.25 kB，既有大包提示保留）。扫描全部 13 个构建文件：密钥字节 0、`/local/` 引用 0、`jingtai-amap` 与名称快照副本 0（bundle 内 `amap` 字样全部来自 maplibre 着色器的 `alphamap_fragment`，与高德无关）。正式建筑、grounds、metadata、道路的 SHA-256 仍为 `b4bc8c03…4fd3`、`66c9f6a6…6d23`、`ed3d8f28…64f80`、`3c20d9ad…ca85`，来源数据逐字节未变。本轮没有发布。校园操场轮廓与真实步行距离仍未满足，不算通过。
-
-该步截图（当时默认镜头 pitch 48°、桌面 16.35）：[白昼](docs/screenshots/jingtai-height-day.png)、[日落](docs/screenshots/jingtai-height-sunset.png)、[夜景](docs/screenshots/jingtai-height-night.png)、[2 公里总览](docs/screenshots/jingtai-height-overview.png)、[合并组卡](docs/screenshots/jingtai-height-group.png)、[校园 390](docs/screenshots/jingtai-height-campus-390-day.png)、[校园 568](docs/screenshots/jingtai-height-campus-568-day.png)、[校园夜景](docs/screenshots/jingtai-height-campus-1440-night.png)。
-
-逐项撤销：① `src/block-layout.js` 删除 `layoutBlocks` 返回中的 `box`／`shortSide`／`thickness`／`displayHeight` 四行，属性恢复 `{ ...p, schematic: true }`；② `src/map.js` 第 165 行 `fill-extrusion-height` 恢复 `['get', 'height']`，第 535 行 `selectionOutline` 去掉 `properties.displayHeight ??`，第 655 行描边改回按 `building.outline` 取 `selectionOutline`；③ `src/main.js` 图例恢复「合并体块高 9.6 m 示意」，`buildingFacts` 去掉 `display` 形参与「模型厚度…」分支，第 222 行合并卡恢复「统一以 9.6 m 示意高度绘制，不代表实际楼高。」；④ 测试侧删除 `tests/block-layout.test.js` 的 `assertDisplayHeight`／`sourceProperties`、两个高度用例与 4 项高度变异，`tests/groups.test.js` 恢复单一严格属性比对并移除短边反算与两项运行时篡改，`tests/jingtai.browser.spec.js` 恢复 `['get', 'height']` 绘制契约、删除厚度分布与三项注入、`assertModelSelection`／`modelThicknessText` 退回 `assertSelectedGeometry` 与 9.6 m 文案、截图前缀恢复 `jingtai-focus-` 并移除 `jingtai-height-*`；⑤ 不改快照、密钥、依赖、45／280 m 归组、-15° 规整与上一轮镜头，撤销后 472 个形状与 5,686 个成员的映射保持原样。本步完成后暂停。
-
-### 校园构图与尖长轮廓精修（2026-09-25～26，历史阶段）
-
-本步只突出校园、收敛残余尖角与狭长条，不继续扩大归组，也不优化建筑高度。桌面默认 zoom 从 15.8 调到 16.35，手机从 16.1 调到 16.55，横屏从 15.8 调到 16.1；pitch 从 57° 降为 48°，仍正北朝上。1440×960 下校园原边界的投影包围框由约 80×42 px 增至 117×75 px，这不是校园面积或建筑覆盖增加。已有分享地址仍保留自己的镜头，查看新构图需用无 hash 的预览地址或点击「回到景泰小学」。
-
-校园继续使用原始 OSM 平面轮廓，三主题采用独立青绿填色与边线，填充透明度从 0.5 提高至 0.9；校名从中心下方移到上方，字号从 12 到 13。未增加操场、建筑或悬浮街区名牌。小屏初次看图发现横屏透视镜压住校名、320 竖屏说明与校名叠字；仅学校场景调整镜头留白、压紧介绍段落间距，并把未打开地点面板时的横屏视角控制条移至左下方，所有说明和控件仍保留，广州塔样式不变。
-
-`src/block-layout.js` 在原有道路／校园／组间分隔后做内切：长短比超过 6 时收短两端，每端最多收短原长边 12%；内角小于 60° 时沿两条邻边各退不超过 3 m 且不超过任一邻边 15%。普通矩形不变、不扩宽、不删除小体块；12% 上限意味着算法并不保证任意输入最终长短比都不超过 6。正式全用途数据实际只改变 **12/472** 个形状，其中近场 **3/55**；最小内角约 30.50°→61.00°，最大长短比约 6.617→6，示意平面面积合计减少 252.43 m²（近场 229.60 m²）。这不是拆除或删掉真实建筑。
-
-45 m／280 m 归组规则、472 个形状、5,686 个原始成员、各近场分区、height／base 与来源属性全部保留。高度模式继续恢复原轮廓和来源高度规则，多栋组仍为 9.6 m 示意高度；用户要求的高度优化是下一步，本步交付后暂停。
-
-独立几何测试核对内切前后每个半平面、正面积、凸性、成员映射、属性及道路／校园排除，包含两轴狭条和道路／校园切角夹具；分别禁用全部精修、收短、削尖的源码缺陷均被对应正向判据拒绝。首跑出现夹具锚点取整和商业类零触发两项测试假设错误，修正夹具及按实际触发形状检验后，两套测试复跑 **70/70**，未放宽几何判据。场景／深链组合首跑 **34/35**，失败是新增颜色缺陷注入匹配两处而非一处；收窄替换片段后场景复跑 **4/4**。最终全量 Node **350/350 通过**（83.6 秒），0 失败／跳过。
-
-构图专项首跑 **1/2 通过**，新用例转屏后的即时校名查询为0；改为等待实际画布尺寸和校名渲染就绪再测量，独立复跑 **1/1 通过**（13.1 秒），不放宽5秒就绪等待、尺寸或避让阈值。覆盖1440×960、390×844、320×568、568×320、667×375、844×390、1024×768；校园与校名保护框均在视口内且与介绍区、透视镜、视角条、顶栏、导航和署名保留至少4 px。保护框是投影范围／保守字宽，不是GPU逐像素遮挡统计。恢复旧远镜头、旧窄屏间距和旧横屏控制条位置的运行时注入均被拒绝，移除注入后重新通过；原校园几何保持逐坐标一致。390竖屏校园约134×86 px，568横屏约98×63 px。广州塔相关浏览器六项本轮首次 **6/6 通过**（48.7 秒），覆盖主题、横屏、用途／高度、搜索／导览恢复和范围。
-
-专项修正后完整运行 `tests/jingtai.browser.spec.js`：**18通过、0失败、2项既有数据缺口跳过**（3.8分钟）。覆盖原空隙点击、缩放后连续形状、整组／单栋高亮、原成员搜索与分享、用途／高度往返、三主题、小屏卡片遮挡注入、缺名称与缺道路降级、POI重试、导览与广州塔切换。校园操场和真实步行距离仍未满足，不算通过；没有重跑完整广州塔套件或五分钟压力段。15,004 ms学校环绕提交901次地图渲染事件，约60.05次／秒、间隔P95 17.8 ms、额外数据请求0，不是GPU帧率保证。本步临时试图与测试结果目录已清理，保留正式截图，完成后暂停，不进入建筑高度优化。
-
-构建通过（JS 1,653.65 kB／gzip444.48 kB，CSS113.70 kB／gzip17.25 kB），保留既有大包提示；13个构建文件扫描密钥、名称快照和`/local/`泄漏均为0。正式建筑、grounds、metadata的SHA-256仍分别为`b4bc8c03…4fd3`、`66c9f6a6…6d23`、`ed3d8f28…64f80`。本轮没有发布。
-
-Chrome另做实际鼠标点选：桌面三主题及390／320／568三种小屏点击青绿校园，均打开正确校园卡片、不出现9.6 m建筑估高，Esc可关闭；这6次操作的控制台警告／错误与页面异常均为0。实际查看的当前截图：[白昼](docs/screenshots/jingtai-focus-campus-1440-day.png)、[日落](docs/screenshots/jingtai-focus-campus-1440-sunset.png)、[夜景](docs/screenshots/jingtai-focus-campus-1440-night.png)、[390竖屏](docs/screenshots/jingtai-focus-campus-390-day.png)、[320窄屏](docs/screenshots/jingtai-focus-campus-320-day.png)、[568横屏](docs/screenshots/jingtai-focus-campus-568-day.png)。预览：`http://127.0.0.1:5174/?scene=jingtai`。
-
-逐项撤销：① `src/scenes.js` 景泰 camera 恢复 `{ zoom: 15.8, mobileZoom: 16.1, landscapeZoom: 15.8, pitch: 57, bearing: 0 }`；`src/map.js` 的 `padding` 恢复横屏 top180／left20／right按地点面板330或20／bottom65，竖屏 top按原短屏105或255、bottom按面板公式或110，桌面 top200／left280／right按面板360或0／bottom60。② `src/grounds.js` 校园填充恢复 day `#eadba1`、sunset `#dfbe84`、night `#b9a578` 与 opacity0.5，边线恢复固定 `#c1a052`，删除边线主题更新；`tower-label` 学校字号恢复12、offset恢复`[0,2]`、anchor恢复`top`。③ `src/block-layout.js` 仅移除 `refineBlock` 函数及其调用，保留道路／校园隔断和45／280归组。④ `src/style.css` 仅撤回本步学校短屏的 h1／按钮／说明间距、横屏 h1字号与视角条 bottom12 规则，保留历史卡片层级和导航退让修复。⑤ 同步恢复对应镜头／校园测试契约，移除本步精修与构图专用测试和 `jingtai-focus-*` 截图，截图 helper 前缀恢复 `jingtai-blocks-`；不改快照、密钥、依赖或既有交互断言。
-
-### 街坊规整：减少碎块并保留道路、校园留白（2026-09-24，基础阶段）
-
-用户指出光影调整后仍然「太碎太乱、图案不规则」，因此本轮改的是归组粒度和显示几何，不再只调色。**本节取代前文 1,062 个凸包的显示契约**：5,686 个原始成员现在对应 472 个显示形状，其中 378 个多栋组、94 个单栋；按成员 `distance <= 500` 统计，近场从 115 组减少到 55 组，原有 773 个近场成员仍全部可追溯。组数减少不代表新增建筑覆盖。
-
-`src/groups.js` 将邻接间距／整组跨度上限改为 45 m／280 m，候选成员内部点的连接线不跨已纳入的地面道路和校园边界。`src/block-layout.js` 在普通用途视图按近场轮廓的主方向取整为 -15°，先生成方正轮廓，再分隔重叠候选并裁避道路、校园；道路转折处保留切角，不强行画成覆盖道路的矩形。候选间隔目标为 8 m，道路与校园退让上限分别为 6 m／5 m，靠近锚点时缩小退让量；这些均是**示意留白，不是实测路宽或小区边界**。服务小路、步道不作为隔断，避免重新切成碎块。
-
-普通视图的单栋也采用规整轮廓，但保留其原 height／base；多栋依旧采用 9.6 m 示意高度。规整可以填补或收缩原轮廓，**不再保证显示体块包含每个原始顶点**；卡片与图例已明示，面积仍为原始成员面积之和。高度视图完整恢复来源轮廓与原高度规则，校园保持独立平面；没有补画操场、楼高、名称或真实街坊边界。
-
-道路只从本机 `data/jingtai-overpass.json` 提取，重现命令为 `node scripts/prepare-block-roads.mjs`，产物为 `public/data/jingtai-roads.geojson`（1,011 条 way，325,705 字节，OSM／ODbL）。保留原坐标与 highway／bridge／tunnel／layer 字段，排除已标注桥梁、隧道及非零 layer；不能据缺失标注断言道路必在地面，也不代表完整路网。没有联网重抓、新依赖或改写正式建筑、grounds、metadata。学校首屏新增一次道路快照请求，广州塔不请求；道路加载失败明确提示重载，不静默退回吞路体块。
-
-卡片挂点和高亮跟随规整后的显示轮廓；搜索、分享的拾取使用显示内部点，但地址栏继续保存用户所选原始成员的 ID 与原轮廓内部点。用途筛选先过滤成员，再重算并缓存该分类的规整结果；不在渲染帧中重复归组。点击推断名称、本机高德边界及无悬浮名牌保持不变。
-
-归组与几何测试首轮 **49/52 通过、3 项失败**，发现重合锚点无法分隔、道路输入顺序改变裁切结果两类缺陷。分别以受安全距离限制的稳定微移、道路端点与线段规范排序修复，原断言保留，复跑 **52/52 通过**；随后另补道路端点触碰和共线重叠屏障用例。独立米制判据覆盖全量体块的闭合、凸性、非退化、两两无正面积重叠、道路中心线与校园不进入体块，并覆盖整段内含短路和路末端；源码缺陷注入验证遗漏隔断／分隔／成员映射、改变高度、绕过筛选／规整都能被拒绝。原始成员仍按 100／200／300／500 m 分区逐 ID 核对，不以总数或组数代替覆盖校验。
-
-最终 Node 全量 **333/333 通过**（97.3 秒，0 失败／跳过）。广州塔六项相关浏览器回归首轮 **5 通过／1 失败**：用途分类取消后 `aria-pressed` 残留；原测试及生产逻辑均未为此修改，失败项独立复跑通过，六项整组复跑 **6/6 通过**（51.0 秒），再单独连续重复该项 **5/5 通过**（50.6 秒）。首次失败原因未证实，不据此归因网络、并发或热更新，也不将后续成功写成首轮全绿。
-
-景泰目标浏览器首轮 **9/14 通过、5 项失败**（5.3 分钟）：3 项执行上下文销毁、1 项分享卡片未出现、1 项试图点击开卡期间隐藏的高度按钮。修正测试操作为先关闭卡片再切模式，复跑这 5 项取得 **4 通过／1 失败**；剩余问题是规整轮廓改变了卡片位置，旧遮挡注入不再真正覆盖标题。保留标题命中、层级、控件退让与转屏断言，用真实地图平移使标题采样点对齐真实控件，并先断言确实重叠，再注入错误层级；该单项随后通过。未把上下文销毁和首轮卡片缺失擅自归为某个已证实的生产原因。
-
-最终完整运行 `tests/jingtai.browser.spec.js`：**17 通过、0 失败、2 项既有数据阻塞跳过**（3.9 分钟）。跳过的校园操场轮廓与步行距离依旧未满足，不算通过。实际覆盖原空隙点击、13／18 级缩放、单栋与整组高亮、规整外原成员搜索／分享、类别／高度往返、三主题、390／568 横竖屏、名称和道路缺失、POI、导览及广州塔隔离；运行时缺陷注入仍使用同一正向判据。15,001.9 ms 学校环绕提交 900 次地图渲染事件，约 59.99 次／秒、间隔 P95 17.5 ms、额外数据请求 0，不是 GPU 帧率保证。没有重跑完整广州塔浏览器套件或五分钟压力段。整组启动曾因预检查引用已清理的结果目录而退出，修正路径后才实际开始上述测试，不计作页面用例失败。本轮探测脚本、探测图和临时测试结果已清理，正式取证截图保留。
-
-构建通过（JS 1,652.87 kB／gzip 444.14 kB，CSS 113.29 kB／gzip 17.21 kB，既有大包提示保留）。扫描全部 13 个构建文件，密钥、名称快照副本与 `/local/` 引用泄漏均为 0；正式建筑、grounds、metadata 的 SHA-256 分别仍为 `b4bc8c03…4fd3`、`66c9f6a6…6d23`、`ed3d8f28…64f80`。没有发布。
-
-已实际查看 Chrome 桌面白昼／日落／夜景及 390×844、568×320，最终规整首屏另行复查：472 个示意形状、校园可见、控制台未见警告或错误。截图见[白昼](docs/screenshots/jingtai-blocks-day.png)、[日落](docs/screenshots/jingtai-blocks-sunset.png)、[夜景](docs/screenshots/jingtai-blocks-night.png)、[390 竖屏](docs/screenshots/jingtai-blocks-390.png)、[568 横屏](docs/screenshots/jingtai-blocks-568.png)。预览：`http://127.0.0.1:5174/?scene=jingtai`。
-
-逐项撤销：① `src/groups.js` 恢复 25 m／150 m，移除道路连接线约束及 `layout` 上下文，`groupDisplay` 直接返回 `groupShape(members)`；② 删除 `src/block-layout.js`、`scripts/prepare-block-roads.mjs` 和道路派生快照，移除 `src/map.js` 的道路请求与传参；③ 地图显示挂点／高亮恢复仅多栋采用 `displayOutline`，`focusPick` 与 `focusBuilding` 恢复原成员点定位；④ `src/main.js` 恢复凸包说明及单栋原轮廓说明；⑤ 同步恢复对应归组、选择与浏览器测试契约，并删除本轮规整专用测试、截图和本节。原始建筑快照、高德快照、密钥与上一轮光影均不需要改动。本项完成后暂停，不继续下一项、不发布。
-
-### 沙盘质感：只调整体块光影与层次（2026-09-24，历史阶段）
-
-本轮只调整景泰的普通用途视图，不新增标签、面板或建筑细节。保留原用途配色，使用白昼偏中性的模型光、日落暖光和夜景冷光，拉开顶面与侧面的明暗；光源固定在地图方向，旋转视角不改变地理受光方向。这是艺术化着色，不是真实日照、投影阴影或新增测绘信息。
-
-`school-building-contact` 在原体块底部加一层柔和衬线，直接复用当前筛选后的 `school-building-groups` 数据与原包络，不偏移或扩张几何；线宽随缩放从 0.6 到 3.2 px，模糊 1.4 px，远处透明度降至 0.05。组色从距校园 450 m 开始向主题远景色过渡，到 2 km 边界完成；这是到固定校园的距离，不是到相机的距离。只弱化远处对比，不隐藏建筑、不改用途统计或拾取。
-
-5,686 个原始要素、1,062 个显示形状、所有高度与 base 均不变，多栋仍为 9.6 m 示意体块；未加圆角或倒角，不填充新的真实建筑细节。进入高度视图时关闭组体块和衬线、恢复原光照；返回用途视图后恢复本主题模型光。广州塔继续原光照与配色，不创建衬线层。
-
-沙盘专用浏览器用例首次通过（24.5 秒），实际往返三主题、住宅筛选、用途／高度、390×844 与 568×320；逐项比较全部显示几何、height、base 与原分组结果，新增数据请求 0。五类缺陷直接注入运行中的地图：错误光色、隐藏衬线、错误衬线源、恢复旧退淡起点、把高度乘二；同一正向判据均能拒绝，`finally` 恢复后重新通过。Node 全部 **292 项通过**，保留默认 1600 m／3 km 契约，并新增可选退淡起点、三主题参数与坏值控制。
-
-最终双场景相关浏览器回归 **18/18 首次通过、0 失败**（3.8 分钟），覆盖三主题、无悬浮名牌、连续形状与原空隙点击、卡片／分享、筛选、学校导览、窄屏及广州塔隔离。学校环绕 15,002 ms 提交 900 次地图渲染事件，约 59.99 次／秒、间隔 P95 17.3 ms、额外数据请求 0；这不是 GPU 帧率保证。Chrome 另实际检查桌面三主题、390 竖屏及568横屏的光影、高度往返与控制台，未见警告或错误；本轮没有重跑完整浏览器套件或广州塔五分钟压力段，公共底图可用性仍不作保证。
-
-构建通过（JS 1,647.88 kB／gzip 442.22 kB，CSS 113.29 kB／gzip 17.21 kB，既有大包提示保留）。扫描全部 12 个构建文件：密钥泄漏、名称快照副本和 `/local/` 引用均为 0；正式建筑与 metadata 的 SHA-256 仍为 `b4bc8c03…4fd3`／`ed3d8f28…64f80`。本轮没有发布。
-
-画面对比：[调整前白昼](docs/screenshots/jingtai-maquette-before.png)、[调整后白昼](docs/screenshots/jingtai-maquette-day.png)、[日落](docs/screenshots/jingtai-maquette-sunset.png)、[夜景](docs/screenshots/jingtai-maquette-night.png)、[390 竖屏](docs/screenshots/jingtai-maquette-day-390x844.png)、[568 横屏](docs/screenshots/jingtai-maquette-day-568x320.png)。预览仍为 `http://127.0.0.1:5174/?scene=jingtai`，完成本项后暂停，等待视觉反馈。
-
-逐项撤销：① `src/atmosphere.js` 删除三主题的 `maquette` 参数；② `src/map.js` 移除 `school-building-contact` 的创建、可见性及主题更新；③ 学校组色两处调用移除 `450` 参数，恢复默认 1600 m 退淡；④ `applyLight` 恢复使用 `theme.light`，移除仅为用途／高度往返增加的调用；⑤ 同步撤回沙盘专用测试及本节，保留既有几何、卡片、名称和无名牌断言。无须改动任何快照、密钥或依赖。
-
-### 街区名牌：已按反馈撤回（历史方案，2026-09-24）
-
-用户看过效果后反馈「这也太乱了吧，不要这样」，已撤掉悬浮名牌的挂载、模块、样式、专用地图 API 与原名牌测试；恢复干净的连续体块，保留点击建筑后显示的推断名称、原始数据和已有横屏卡片修复。
-
-撤回后 Node 测试与构建通过，8 项相关浏览器回归首次全部通过（1.4 分钟），覆盖三种屏幕、默认与放大镜头无名牌、点击群卡与分享、缺名称降级、连续形状、用途筛选和广州塔切换；注入名牌 DOM 后同一无名牌判据必须失败。Chrome 实测桌面和390竖屏没有悬浮名称，手机上搜索定位后仍能打开含「白兰花园」推断名称的原卡片，桌面控制台无警告或错误；没有重跑完整浏览器套件。当前画面见[首屏](docs/screenshots/jingtai-desktop.png)，以下是撤回前的实现、测试与截图，仅作历史记录，不代表当前页面。
-
-当时景泰本机开发页新增门牌式名称按钮、虚线挂点与「推断」角标；沿用现有高德离线快照，不新增查询、依赖或真实边界。点击或用 Tab／Enter 打开对应整组卡片，关闭后返回原名牌焦点；卡片与名牌使用同一匹配规则，分享仍保存真实成员 ID 和原轮廓内部点。名称较长时省略显示，完整名称保留在按钮提示和无障碍名称里。
-
-`src/nameplates.js` 按当前用途显示形状缓存候选，移动时只投影和布局；同一高德 POI id 在一屏只显示一次，不合并不同 POI 的同名文本。缩放小于 14.6 隐藏；14.6～16.4 只显示不少于 10 栋的组；16.4 起允许较小的多栋组。桌面最多 12 块，宽不超过 760 px 或高不超过 500 px 时最多 5 块，控件与名牌间预留 8 px、视口边缘预留 12 px，校园点及校名另留保护区；空位不足就不显示，不能挤走地图控件。568×320 默认镜头下无候选可安全放置，因此名牌为 0，不代表名称丢失；转回竖屏恢复。卡片、导览和高度模式暂时隐藏整层，用途与氛围切换仍生效。面板内容异步增高由 `ResizeObserver` 触发布局，地图销毁时移除监听和 DOM。
-
-名牌只在 `isSchool && import.meta.env.DEV` 下动态加载，不阻塞地图启用；快照缺失时不创建名牌层，原卡片继续降级。生产构建不带名牌模块、快照或密钥，也不请求 `/local/`；部署授权与名称数据再分发授权均未给出，本轮没有发布。
-
-用途筛选可能保留相同 `groupId`，但可见成员、包络与匹配名称已经改变。复用的名牌按钮会同步更新名称、POI id、提示与无障碍名称，不能仅在创建按钮时赋值。真实数据用例 `322008843` 从「显示全部」的「白云设计院宿舍」切到「住宅」的「交通大院」，点击后的卡片与名牌一致，恢复全部后也恢复原名。
-
-验收过程保留首次失败：首轮三项名牌测试 **2 通过／1 失败**，独立复跑仍发现 POI 面板异步增高后覆盖名牌；补入尺寸监听解决。随后 568×320 的「默认至少一块」预期失败，经独立枚举全部候选确认可安全放置数为 0，改为验证无可行空位时确实为 0，同时增加把有名体块移到空区后的可见正向断言，未取消碰撞检查或缩小避让间隔。原相关回归先取得 **18/18 通过**，随后又发现同编号筛选后旧名称残留；新增用例在修复前实际报 POI id 不一致，修复后的最终相关双场景回归为 **19/19 通过、0 失败**（3.4 分钟），不是首轮全绿。
-
-最终 Node 测试 **307/307 通过**，新增名牌纯函数测试 17 项；覆盖候选、内部锚点、排序、缩放、去重、边界、间隔、数量上限与输入不变，并用错误锚点和坏布局注入验证判据。浏览器另实际注入错误位置和「官方」角标，确认对应断言失败。最终回归覆盖键盘／鼠标开卡、焦点返回、原成员分享、筛选、三档主题、双面板、横竖屏、延迟名称加载、缺快照降级、导览及广州塔隔离；15 秒学校环绕提交 900 次地图渲染事件、约 59.99 次／秒、间隔 P95 17 ms、额外数据请求 0，不等于 GPU 帧率保证。本轮未重跑广州塔五分钟压力段与完整浏览器套件，不以历史结果代替。
-
-构建通过（主包 1,647.21 kB／gzip 442.04 kB、CSS 114.38 kB／gzip 17.42 kB、Worker 508.48 kB，既有大包提示保留）；产物扫描无密钥、名称快照、`/local/` 或名牌模块。实际生产浏览器内名牌 0、推断名称 0、本机名称请求 0、页面异常 0，原建筑群卡片仍可打开。正式建筑与 metadata 校验和未变。
-
-看效果：`http://127.0.0.1:5174/?scene=jingtai`；截图见[白昼](docs/screenshots/jingtai-nameplates-day.png)、[日落](docs/screenshots/jingtai-nameplates-sunset.png)、[夜景](docs/screenshots/jingtai-nameplates-night.png)、[桌面](docs/screenshots/jingtai-nameplates-1440.png)、[390 竖屏](docs/screenshots/jingtai-nameplates-390.png)、[568 极矮横屏退让](docs/screenshots/jingtai-nameplates-568.png)。
-
-本轮撤销：① 从 `src/main.js` 删除地图就绪后的 `namesReady.then` 挂载分支，名称预取与卡片命名保留；② 从 `src/map.js` 删除 `groupShapes` getter 与 `selectGroup` 方法；③ 删除 `src/nameplates.js`、`tests/nameplates.test.js`、`src/style.css` 的 `.street-nameplate`／`.street-nameplates` 规则及紧凑尺寸规则；④ 从 `tests/jingtai.browser.spec.js` 移除四项 `street nameplates` 用例及两项辅助函数，并移除缺快照与切换广州塔用例中的名牌层断言；⑤ 删除 `docs/screenshots/jingtai-nameplates-*.png` 与本节即可。正式数据、名称快照、卡片挂点与上一轮横屏修复均不需要恢复。
+**这一节的数。** 仓库这一笔一共动了 **213 条路径**：撤掉 182 条、就地改写 31 条，没有一条是新增。撤掉的 182 条里：截图 137、审计取证 8、升级方案 1、专属模块 8、测试整册 8、脚本 10、数据 10 份（`public/data/jingtai-*` 6 份约 3.6 MB＋`data/jingtai-*` 4 份）。留下来的底账：`src/` 46 个模块、29 册 Node 测试共 **485 项全绿**（顶层 324＋嵌套 161，0 失败），浏览器两册共 **55 项＝53 通过＋2 明确 skip、0 红**（`--workers=1`，31.0 分钟，其中 `browser.spec.js` 一册占 28.0 分钟）；`npm run build` 通过，`node scripts/scan-dist.mjs` 对 19 个产物文件全零命中、32 位十六进制串 0 条——高德那条外部依赖确实离场了。第一遍冒烟是**红的**：MapLibre 逐图层报 `fill-extrusion-opacity[6][2]: Expected value to be of type number, but found array<value, 2>`，成因是拆掉 `if (!school)` 那层 `if` 之后，`src/map.js:334` 那个同名的表达式构造函数从块级作用域升成了函数级，把 `src/facade.js` 导出的数值 `lampWeight` 遮蔽掉，夜景循环于是往全局状态里写的是数组。改成 `lampState` 之后 5 项冒烟全绿，此后整套没有第二条红。
 
 ## 广州塔：从平面轮廓到能看出立面
+
 
 ### 落地的那一片影：车、人、树脚下与楼根（2026-10-10，优化清单页面内第 1 项）
 
@@ -876,7 +589,7 @@ Node 新增 19 项（`tests/engine.test.js`，不开浏览器）：投影与 `pl
 
 `?engine=three` 那侧**没接这段**：引擎的 `setView` 现在还是瞬移（连"回到广州塔""看全范围"都是跳的），缓动排在 Phase 4 的相机里，所以那边点链接仍是直接换页。撤销：删 `src/scene-flight.js` 与 `tests/scene-flight.test.js`、`src/main.js` 的 `#scene-nav` 监听与 `arrive` 传参、`src/map.js` 的 `liftOff`／`relay`／`FLY_IN_MS` 引用，链接即回到浏览器原生的换页。
 
-接力三张取证（`node scripts/shot-scene-flight.mjs` 出，与判据读同一套 API）：[开屏](docs/screenshots/v8-scene-flight-1-canton.png)、[起飞那一格](docs/screenshots/v8-scene-flight-2-liftoff.png)（11.81 级、俯仰 0，3 km 街区缩成画面正中一枚约 150 px 的圆盘）、[落到景泰之后](docs/screenshots/v8-scene-flight-3-jingtai.png)（16.65 级／58°，它自己的开屏机位）。
+接力三张取证（`node scripts/shot-scene-flight.mjs` 出，与判据读同一套 API）：[开屏](docs/screenshots/v8-scene-flight-1-canton.png)、[起飞那一格](docs/screenshots/v8-scene-flight-2-liftoff.png)（11.81 级、俯仰 0，3 km 街区缩成画面正中一枚约 150 px 的圆盘）、落到景泰那一张（16.65 级／58°，它自己的开屏机位）——**2026-10-16 景泰整块撤除时这一张与出它的脚本一起删了，本节与接力本身都只剩前两张取证。**
 
 #### 8｜本轮收口（2026-10-06）
 
@@ -1806,20 +1519,20 @@ npm run build
 npm run preview
 ```
 
-生产产物位于 `dist/`，预览默认 `http://127.0.0.1:4173`。当前双场景主包 **1,661.50 kB / gzip 447.29 kB**，样式 **114.32 kB / gzip 17.37 kB**，另有 **508.48 kB Worker**；Vite 的大包提醒未隐藏。广州塔静态数据大小：建筑 GeoJSON **1,660,823 字节 / gzip 275,979 字节**，检索索引 **124,017 字节 / gzip 20,161 字节**（首次打开搜索才下载），塔轮廓 **1,450 字节 / gzip 760 字节**。两地区数据均独立按需加载，不打进 JS 主包，部署服务器需自行开启压缩。
+生产产物位于 `dist/`，预览默认 `http://127.0.0.1:4173`。当前主包 **1,661.50 kB / gzip 447.29 kB**，样式 **114.32 kB / gzip 17.37 kB**，另有 **508.48 kB Worker**；Vite 的大包提醒未隐藏。广州塔静态数据大小：建筑 GeoJSON **1,660,823 字节 / gzip 275,979 字节**，检索索引 **124,017 字节 / gzip 20,161 字节**（首次打开搜索才下载），塔轮廓 **1,450 字节 / gzip 760 字节**。静态数据按需加载，不打进 JS 主包，部署服务器需自行开启压缩。
 
 ## 使用
 
 1. 默认看广州塔、珠江和对岸楼群。左键拖动只平移；旋转用 **⌥/Alt 加左键拖动**（横向转方位角，纵向调俯仰，触控板和鼠标都可用），鼠标也可以右键拖动或 ⌃/Ctrl 加左键拖动；滚轮缩放，手机双指操作。⌥ 拖动只转视角，不会移动中心，灵敏度为横向 100 像素约 20°、纵向 100 像素约 25°（俯仰全程 0°～70° 约需 280 像素）。点击空白地图不会换中心或查询地点。
 2. 点击快照内可见楼块或塔身查看信息卡（宽 250 像素）：用途与类型、高度及其来源（OSM 标注 / 按层数估算 / 高度未知；未知项在普通模式下仅以缺省 9.6 米示意）、占地、地址与建成年份，并附该要素的 OpenStreetMap 原始页面；分类已写在卡片眉标，正文不再重复一行。选中体块以青色高亮，鼠标移到楼块上会变成手型。挂点不靠估计：卡片依次挂在楼块近角下方、屋顶线上方、楼块左或右侧、MapLibre 自动位置，每个候选都按当前渲染帧测量「出屏、压住控件、遮住本体、压住底部控制条」四项，先全部为零者胜，否则取最轻的一项；打开卡片时关闭按钮取得焦点用的是 `preventScroll`，地图容器不会为露出按钮而滚动，测量的那一帧就是点击结束后仍存在的那一帧。拉伸体块自底面向上绘制，所以挂在近角下方或屋顶上方都能让本体保持可见；屋顶线由屏幕向上逐步命中测试求得，高楼的屋顶在透视下会横向偏移，故两侧挂点用于矮而宽的楼块和 667×375 这类极矮横屏。测量结果保证卡片不遮住自己所描述的那栋楼；确实压住底部控制条时，控制条临时淡出并在卡片关闭后立即恢复，避免留下看不见也点不到的按钮。OSM 没有名称的楼块明确标注「未标注名称」，不根据位置或高度编造名字；3 公里快照之外仅作背景显示的灰色体块不可点击。
 3. 顶部「搜索楼名」打开检索面板，可用楼名、英文名，或「街道 + 门牌」「纯门牌号」查询（例：广州塔、赤岗、晴波路 33、795）。单个汉字即可查询（如「塔」），字母和数字至少要两个字符，因为单字母命中过宽。结果分五档排序：中文名前缀 → 英文名前缀 → 中文名包含 → 地址前缀 → 地址或英文名包含，同档按距塔远近再按 OSM ID，最多 8 条，每条显示中文/英文名、用途、高度说明与距广州塔的直线距离。塔身的结果行标注「三维示意塔身」而不是 OSM 高度，因为参数化模型的高度和快照里的轮廓高度不是一回事。`↓`/`↑` 选行、`Enter` 打开，选中后透视镜恢复普通模式与全部分类/来源，镜头飞到该楼块并按点击同样的方式打开卡片与高亮；`Esc` 分两步，先清空查询和结果，再收起面板。索引共 638 条，首次打开搜索时才下载并缓存在内存，重复查询、重复开关面板都不再请求，全程不接触 Overpass。可搜索与拾取的建筑仅来自 3 公里快照；没有名称或地址的楼块查不到，也不会给出近似结果或猜测名称。
-4. 「看全范围」切到俯视总览（两个场景同名），虚线圈表示半径 3 公里，而不是直径 3 公里。「回到广州塔」恢复近景构图。
+4. 「看全范围」切到俯视总览，虚线圈表示半径 3 公里，而不是直径 3 公里。「回到广州塔」恢复近景构图。
 5. 「环绕 / Orbit」绕固定塔址旋转；手动操作、切到后台、打开地点面板或回到塔址都会停止。默认不自动旋转，系统减少动态效果设置会取消视角过渡动画。
 6. 「周边地点」按需展开列表和标记，首次查询 3 公里内餐饮、游览、出行和购物地点，最多显示最近 200 处。图标不做相互避让，已加载的地点在地图上都能点；名称标签仍会避让，密集处只显示部分名称。收起面板也收起标记，不让标签遮住首屏。
 7. 点击标记或列表查看安全文本卡片及 OSM 原始页面。重复展开、分类切换不重复请求；加载失败可以点击「重新加载地点」，不会阻塞地图。Escape 按层关闭：先关打开的卡片，再收起地点面板或搜索面板并把焦点还给入口。
 8. 地址栏就是当前视角的链接：`#map=缩放/纬度/经度/方位角/俯仰&b=OSM ID@纬度,经度`，前三个分段沿用 OpenStreetMap 自己的顺序。`parseView` 按 `VIEW_LIMITS.span = 0.3` 定义的经纬度矩形校验镜头中心，并另行校验镜头参数，**不是按 3 公里或 5 公里圆形范围判断链接有效性**。复制有效链接打开后，镜头按分享时的角度复现，并尝试像点击那样重新拾取、高亮并打开快照楼块的卡片。拾取按楼块轮廓内部锚点进行（面质心外的凹形楼用射线法另找内部点），因此凹形楼的卡片不会开错邻居。镜头与选中要素独立校验：无效镜头或无效选中信息只忽略各自部分，不会丢弃整条链接，也不会把越界值夹紧；无有效镜头时使用默认构图，找不到该楼块时静默放弃，不弹错误也不留假高亮。地址栏会改写为实际状态，不保留被拒绝的参数；镜头链接可落在建筑快照之外，但不会因此扩大可搜索/拾取的 3 公里建筑范围。环绕旋转期间不写地址栏（`replaceState` 有频率限制），停止后补写一次；按 `Esc` 关闭卡片会去掉 `&b=` 分段，只留镜头。透视镜模式、分类与来源筛选不保存到分享 URL。
 9. 手机竖屏时，地点列表、地图署名和视角控制条各占独立区域；长卡片可内部滚动。横屏时列表放在右侧，镜头适当缩远以显示完整塔身，保留当前地点和筛选状态。地图署名入口始终可展开查看数据来源。搜索面板与地点抽屉同时打开时会互相让位：竖屏时检索面板在顶部、地点抽屉在底部，各自限定高度；横屏时二者分居左右，署名入口不淡出也不被遮住。高度透视镜场景收起大标题，窄视口临时隐藏冗余视角控件，极矮横屏的透视镜面板可内部滚动。
-10. 顶部「白昼 / 日落 / 夜景」同步切换天空、江面、道路、普通模式的建筑分类配色与广州塔材质灯光，图例及面板也随之换色；高度透视镜下保留高度分档编码及来源透明度，不被氛围分类色覆盖。夜景使用深蓝城市底色与青紫色塔灯，并打开按 OSM id 取余分档的**示意灯窗**（白昼、日落与高度透视镜下自动收起）；日落使用暖金与暮紫；均为艺术化氛围，不是实时天气、真实日照或灯光模拟，灯窗也不代表入住率或真实照明计划。氛围胶囊右侧的「江面与塔身动效」开关（`role="switch"`）控制江面逐行滚动与塔身自发光的呼吸，默认跟随系统的「减少动态效果」偏好，关掉后画面回到出厂那一帧；它是开关而不是第四个氛围，不改变氛围按钮的选中态，景泰场景没有可动的画面因而不显示它。切换不重载地图，不改变镜头、搜索内容及选中建筑，也不额外查询 Overpass；可用 Tab 和 Enter 操作。默认白昼，氛围仅当前页面生效，刷新或打开分享链接仍从白昼开始。
+10. 顶部「白昼 / 日落 / 夜景」同步切换天空、江面、道路、普通模式的建筑分类配色与广州塔材质灯光，图例及面板也随之换色；高度透视镜下保留高度分档编码及来源透明度，不被氛围分类色覆盖。夜景使用深蓝城市底色与青紫色塔灯，并打开按 OSM id 取余分档的**示意灯窗**（白昼、日落与高度透视镜下自动收起）；日落使用暖金与暮紫；均为艺术化氛围，不是实时天气、真实日照或灯光模拟，灯窗也不代表入住率或真实照明计划。氛围胶囊右侧的「江面与塔身动效」开关（`role="switch"`）控制江面逐行滚动与塔身自发光的呼吸，默认跟随系统的「减少动态效果」偏好，关掉后画面回到出厂那一帧；它是开关而不是第四个氛围，不改变氛围按钮的选中态。切换不重载地图，不改变镜头、搜索内容及选中建筑，也不额外查询 Overpass；可用 Tab 和 Enter 操作。默认白昼，氛围仅当前页面生效，刷新或打开分享链接仍从白昼开始。
 11. 首屏「四站导览」依次观看广州塔 → 海心桥 → 花城广场 → 广州图书馆，每站一句介绍，到站后停留 7 秒再前往下一站。播放时收起首屏文字与非必要控件，保留氛围入口与地图署名；可暂停、继续、前后切站或退出。拖动、滚轮、地图键盘操作、Esc 或切到后台立即退出，停在当前镜头而不跳回塔址。末站结束后也保持图书馆视角。横竖屏切换保留当前站点及播放状态；系统开启「减少动态效果」时默认手动切站且无镜头动画。开始导览会关闭已有卡片与地点/搜索面板，并将透视镜恢复为普通模式与全部分类/来源。这是镜头导览，不提供实际步行路线。
 12. 六个地标（广州塔、广州东塔、广州西塔、广东省博物馆、海心桥、花城广场）在地图上各挂一块带自己剪影的名牌，点击打开卡片，卡片里可以「飞过去」。两块牌压到一起时按 OSM 记录的高度让位：矮的那块先收起文字、只留仍可点击的剪影，剪影仍压着就整块淡出，镜头拉开自动回来。名牌**不会横移也不会缩短**——一块牌只标在它自己那个要素的点上，说不清位置就宁可不说。手机竖屏六个名字本来就不显示，所以这轮避让不参与，六块剪影一块不少。
 13. 「城市透视镜」将原用途分类图例改为可切换的筛选按钮。高度模式按米分为 **[0,20)、[20,60)、[60,100)、[100,200)、200+** 五档；统计按所选分类计算整个 3 公里快照，不随视口移动或缩放变化，单位是建筑/部件要素，不是独立建筑栋数。来源开关与用途分类取交集过滤地图：OSM 高度标注为实色（不代表实测），层数估算的不透明度（opacity）为 **0.55**；高度未知仅显示灰色平面，仍可平面拾取与高亮，**不以缺省 9.6 米进入任何数值高度分布**。广州塔始终保留作参照，不受建筑筛选影响，也不计入透视镜统计。
@@ -1930,7 +1643,7 @@ npm run test:browser
 
 导览截图：[广州塔](docs/screenshots/canton-tour-tower.png)、[海心桥](docs/screenshots/canton-tour-bridge.png)、[花城广场](docs/screenshots/canton-tour-square.png)、[广州图书馆](docs/screenshots/canton-tour-library.png)、[320 像素竖屏](docs/screenshots/canton-tour-mobile-320.png)、[568 像素横屏](docs/screenshots/canton-tour-landscape-568.png)、[日落](docs/screenshots/canton-tour-sunset.png)、[夜景](docs/screenshots/canton-tour-night.png)、[320 像素夜景](docs/screenshots/canton-tour-night-320.png)。
 
-对比截图保存在 `docs/screenshots/`：旧版西关仅作为历史对比，当前可切换广州塔与景泰小学，但未恢复西关或任意选点入口。
+对比截图保存在 `docs/screenshots/`：旧版西关仅作为历史对比，当前只有广州塔这一个场景，未恢复西关、景泰或任意选点入口。
 
 | 旧版：西关 | 新版：广州塔与珠江 |
 | --- | --- |
@@ -1942,24 +1655,18 @@ npm run test:browser
 
 ## 代码入口
 
-- `src/scenes.js` / `src/config.js`：双地区身份、中心、半径、独立资源与相机参数；按查询参数选地区，提供视角限制、分类色板及公共服务。
-- `src/jingtai-data.js` / `scripts/prepare-jingtai.mjs`：学校快照的几何拼接、关系建筑、公园球场、POI归一化、离线生成与验证。
-- `src/walking.js`：共享OSM节点步行图、通行限制与最短距离；不能连通时不返回路线。
-- `src/grounds.js`：学校真实校园、球场、公园与林地面及三档氛围。
+- `src/scenes.js` / `src/config.js`：唯一的地区身份（广州塔）、中心、半径、资源名与相机参数；`resolveScene` 仍按查询参数选地区，选不到就落回塔。另提供视角限制、分类色板及公共服务。
 - `src/atmosphere.js`：白昼、日落、夜景的地图与塔身配色、灯光预设。
-- `src/tour.js`：每个地区各四站的真实落点、介绍与到站后计时、暂停/继续及退出的导览调度。
-- `src/groups.js`：显示层的相邻归组规则（`GROUP_RULES` 的 25 米边到边间隙与 150 米跨度上限）、单链划分的确定性排序，以及每组的一栋数、合计占地、跨度、名称与来源构成统计；不改几何、不写数据。
-- `src/block-layout.js`：景泰街坊体块的 -15° 规整与尖长精修，以及两场景共用的 `schematicThickness`（短边 × 0.24，夹 9.6–24 m）与逐栋派生 `schematicDisplayHeights`；只写渲染字段 `displayHeight`，不改 `height`／`base`／`heightSource`。
+- `src/tour.js`：广州塔四站的真实落点、介绍与到站后计时、暂停/继续及退出的导览调度。
+- `src/block-layout.js`：只剩两行导出——`schematicThickness`（短边 × 0.24，夹 9.6–24 m，0.1 m 取整）与逐栋派生 `schematicDisplayHeights`；只写渲染字段 `displayHeight`，不改 `height`／`base`／`heightSource`。街坊包络、-15° 规整与道路／校园裁避随景泰那侧撤掉了。
 - `src/facade.js`：广州塔立面窗格与夜景灯窗的程序化生成——固定种子 mulberry32、32×32 无缝图、每档氛围一张，以及实测得到的 `FACADE_METRES_PER_PIXEL`（32 px 跨 29.3 m 墙面）；另有 `LIGHT_TIERS`（2／5／9 格）、`LIGHT_TILE`（4×4 网格、亮格 alpha 235）与 `lightTexture(index)`，用 `pickCells` 的固定种子洗牌挑出**恰好** k 格而不是按比例抽。只产图，不碰数据与图层。其中 `seededRandom` 已导出，供江面纹理复用同一套确定性随机。
 - `src/water.js`：广州塔江面纹理的程序化生成——64×64 无缝图、每档氛围一张、8 条带里「2 行可下墨＋1 行影子＋留白」的短横划结构，以及文件头记录的实测屏幕空间尺度（二维 `fill-pattern` 图上一个像素＝屏幕上一个像素，与立面那种按米平铺相反），因此它只有屏幕尺寸、没有米尺寸；`scrollWater(image, offset)` 从原始整图逐行旋转、按图高回绕、拒绝非整数偏移且绝不写进源图。只产图，不碰数据与图层。
 - `src/lens.js`：高度分档、来源编码、类别与来源过滤表达式及按分类汇总的整份快照统计。
 - `src/map.js`：底图样式、建筑图层、分级显示、透视镜筛选与高度/平面图层及 API、镜头、导览构图与中断、楼块及平面拾取/高亮、卡片定位与地址栏读写；立面／灯窗／江面三张共面覆盖层的注册与门控（`applyLens()`、`setAtmosphere()`），以及驱动江面滚动与塔身呼吸的单个 rAF 循环（`setMotion()`／`motionStatus()`）。
 - `src/tower.js`：参数塔模型和共享 WebGL CustomLayer；`TOWER_GLOW_FLOOR`、`towerBreath(cycle)`、`towerGlow(baseline, amount)` 与 `setPulse(amount)` 只在氛围自己声明的 emission 基线上做缩放，基线为 0 时脉冲恒为 0。
 - `src/buildings.js` / `scripts/prepare-buildings.mjs`：OSM 建筑归一化、标签白名单、塔轮廓提取、轮廓内部锚点、检索索引生成与按 `RADIUS_METERS` 筛选的快照转换。
-- `scripts/extract-eastasia-footprints.mjs`：东亚建筑矢量轮廓（Zenodo 8174931）近场切片的可复现提取——zip64 中央目录 + 分块可续传 Range + `inflateRaw` + `.shp`/`.dbf` 解析 + EPSG:32649 反算 + ±2 km 顶点盒；`--verify` 拿仓库那份切片当对照物，`--prefix` 允许在下载未完成时先对已扫号段的账，默认不覆盖正式切片（要 `--write` 才写）。
 - `src/search.js`：文本归一化、分档排序与索引下载；`src/link.js`：`#map=…&b=…` 视角链接的解析与格式化。
-- `src/scene-flight.js`：街区之间的两段接力（V4-8）——按"街区缩成一枚 150 px 圆盘"反解中继缩放、`relayView` 给起飞与落地共用那一格、`sessionStorage` 交接的写与一次性读（TTL 20 s、过期/对不上场景都吃掉），以及 `sceneGap` 这条"两份快照之间还空多少米"的量尺。
 - `src/main.js` / `src/style.css` / `index.html`：界面结构、城市透视镜渲染与事件、分类按钮及响应式面板、氛围切换、导览控制条、检索面板、按需地点面板、安全文本卡片。
 - `src/pois.js` / `src/geo.js`：广州塔 Overpass 请求与缓存、球面距离、按地区半径生成范围多边形与坐标格式化。
-- `tests/*.test.js`：当前共 **618 项 Node 测试（362 项顶层 + 256 项嵌套子测试）**。覆盖原地图/建筑/POI/氛围/透视镜/导览契约，以及学校原始数据SHA256、离线逐字节再生、真实几何与洞、关系建筑身份和分享、步行图通行限制与不可达原因、相邻归组的阈值与跨度上限、两场景共用的示意厚度曲线与逐栋派生、立面窗格贴图的周期性与米制诚实、江面贴图的条带结构与屏幕空间诚实（源码一旦出现 `METRES` 即失败）、东亚轮廓提取的 shapefile/dBASE 字节布局与 UTM 正反算闭合。双场景导览使用独立Worker加载真实配置，80个新增源码变异逐字段验证契约；另有数据、身份、排序及搜索定时器变异，不能以导入错误替代断言失败。
-- `tests/browser.spec.js` / `tests/jingtai.browser.spec.js` / `tests/engine.browser.spec.js`：广州塔册 37 发（视口矩阵等参数化项在运行时展开成 43 发）、学校册 23 发、新引擎册 7 发，整套共 **73 发**（2026-10-07 整套实跑 **71 通过／2 既有 `fixme`／0 红，34.3 分钟**；首次是 69 通过／2 红，两条红一条是本轮自己写下的等待有竞态、修好后 `--repeat-each=3` 三次全绿，一条是外部 Overpass 抖动、单独复跑 30.8 s 通过，见第 13 节）；其中学校操场与步行距离 2 项明确 `fixme`，不计作完成。可执行项覆盖真实操作、页面异常、资源隔离、六种小屏、减少动态效果、完整导览、搜索分享、重试、缓存、连续体块点击与筛选、高度视图往返和整组高亮、两引擎同手势读数与同秒动效读数、场景接力、立面层带节奏、夜景逐楼灯火与换窗交叉淡；验收结果见上节。
+- `tests/*.test.js`：当前共 **485 项 Node 测试**（顶层 324 ＋ 嵌套子测试 161，29 册）。覆盖原地图/建筑/POI/氛围/透视镜/导览契约，以及正式快照的几何与洞、分享链接的关系与命名空间前缀、逐栋示意厚度曲线与短边分档、立面窗格贴图的周期性与米制诚实、江面贴图的条带结构与屏幕空间诚实（源码一旦出现 `METRES` 即失败）、近场三组装配与 teardown 台账、路口信号灯的派生与排队。导览用独立 Worker 加载真实配置逐字段验契约；每格新断言都配一条自己的源码变异，不能以导入错误替代断言失败。
+- `tests/browser.spec.js` / `tests/engine.browser.spec.js`：广州塔册与新引擎册两册，整套共 **55 项＝53 通过＋2 明确 skip、0 红**（`--workers=1`，31.0 分钟）；可执行项覆盖真实操作、页面异常、资源隔离、六种小屏、减少动态效果、完整导览、搜索分享、重试、缓存、高度视图往返、两引擎同手势读数与同秒动效读数、立面层带节奏、夜景逐楼灯火与换窗交叉淡、泛光链与地标壳体、江面波光、teardown 台账。

@@ -6,7 +6,6 @@ import * as THREE from 'three';
 import { ATMOSPHERES } from '../atmosphere.js';
 import { DEFAULT_CENTER, SCENE, VIEW_LIMITS } from '../config.js';
 import { formatView, parseView } from '../link.js';
-import { FLY_IN_MS } from '../scene-flight.js';
 import { LANDMARKS } from '../landmarks.js';
 import { createRig } from './camera.js';
 import { createGround } from './ground.js';
@@ -119,7 +118,7 @@ export function createFpsMeter({ every = 500, onSample } = {}) {
 }
 
 /**
- * @param {{container: HTMLElement, canvas?: HTMLCanvasElement, mode?: string, data: {buildings?: object[], streets?: object[], water?: object[], greens?: object[], blocks?: object[], grounds?: object[]},
+ * @param {{container: HTMLElement, canvas?: HTMLCanvasElement, mode?: string, data: {buildings?: object[], streets?: object[], water?: object[], greens?: object[], blocks?: object[]},
  *   nearField?: object, // 近场三组（车、人、船，`src/near-field.js` 造好交进来）
  *   bases?: object, // 楼根接地带（`src/shadow-pads.js`，与现版同一份）
  *   testBuildings?: number, // 0 = 画全量；给一个 N 就只立最高的 N 栋 limits?: object, onFrame?: Function, writeHash?: boolean}} options
@@ -127,7 +126,7 @@ export function createFpsMeter({ every = 500, onSample } = {}) {
 export function createEngineScene(options) {
   const {
     container, canvas = container.querySelector('canvas') ?? document.createElement('canvas'),
-    mode = 'day', data = {}, testBuildings = 0, limits = VIEW_LIMITS, onFrame, writeHash = true, arrive = null,
+    mode = 'day', data = {}, testBuildings = 0, limits = VIEW_LIMITS, onFrame, writeHash = true,
   } = options;
   // 当前氛围的 id。窗纹按 id 取图（`FACADE_THEMES` 的键就是它），所以这个 id 必须活着，不能只剩一堆混好的颜色。
   let atmosphereId = ATMOSPHERES[mode] ? mode : 'day';
@@ -149,7 +148,7 @@ export function createEngineScene(options) {
   const fog = new THREE.Fog(0x000000, 1500, 9000);
   scene.fog = fog;
 
-  const surfaces = [...(data.water ?? []), ...(data.greens ?? []), ...(data.blocks ?? []), ...(data.grounds ?? [])];
+  const surfaces = [...(data.water ?? []), ...(data.greens ?? []), ...(data.blocks ?? [])];
   const ground = createGround({ project, radius: SCENE.radius, colors: groundColors(ATMOSPHERES[atmosphereId] ?? ATMOSPHERES.day),
     streets: data.streets ?? [], surfaces });
   // 江面那层波光：与现版同一个形状——水面是一层平色，波光压在它上面、只带 alpha。像素出自 `src/water.js` 那三张图，
@@ -165,7 +164,7 @@ export function createEngineScene(options) {
     !shellFeatures.length || !underShell(feature));
   const features = testBuildings ? pickTallest(bucketFeatures, testBuildings) : bucketFeatures;
   // 地标那一整批资产（广州塔网格、东西塔与省博的壳体、海心桥、塔顶光柱、三塔落水带）走的是现版同一批纯工厂，
-  // 搬进来的只有"谁交镜头"这一格。没有桥面快照的那一侧（景泰）就没有壳体，这一整块不存在。
+  // 搬进来的只有"谁交镜头"这一格。快照里没有桥面，就没有壳体，这一整块不存在。
   const landmarks = shellFeatures.length
     ? createLandmarks({ features: shellFeatures, river: data.river ?? [], origin: SCENE.center ?? DEFAULT_CENTER, mode: atmosphereId })
     : null;
@@ -272,7 +271,7 @@ export function createEngineScene(options) {
     canvas,
     project,
     limits,
-    initial: stored ?? arrive ?? heroView,
+    initial: stored ?? heroView,
   });
 
   const screen = ({ lng, lat, altitude = 0 }) => {
@@ -405,13 +404,6 @@ export function createEngineScene(options) {
   };
   renderer.setAnimationLoop(frame);
 
-  // V4-8 接力的下半场（引擎这一侧）：开屏开在中继那一格的，第一帧之后就降回默认机位；地址里带深链时不降，
-  // 因为那一条链接说的就是用户要看的那一格。减弱动效下直接落位，不飞。
-  if (arrive && !stored) {
-    const still = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-    rig.flyTo(heroView, still ? 0 : FLY_IN_MS);
-  }
-
   return {
     engine: 'three',
     canvas,
@@ -421,11 +413,9 @@ export function createEngineScene(options) {
     camera: rig.camera,
     view: rig.view,
     setView: rig.setView,
-    // 缓动版：Phase 2 之前 `setView` 是唯一改镜头的出口，所以"回到广州塔""看全范围"都是瞬移。接力（V4-8）
-    // 需要的是现版那一段飞行动作，于是补一个 `flyTo`；`liftOff` 是它在接力里的名字——引擎这侧没有导览、
-    // 环绕、卡片要让开，升起就是升起。
+    // 缓动版：Phase 2 之前 `setView` 是唯一改镜头的出口，所以"回到广州塔""看全范围"都是瞬移。
+    // 界面那一侧的镜头按钮走 `flyTo`，卡片要让开、导览要停这些是现版那侧的事，引擎这一侧没有。
     flyTo: rig.flyTo,
-    liftOff: (view, duration) => rig.flyTo(view, duration),
     /**
      * Where a ground point lands on the canvas, in CSS pixels. The map used to hand this over as `map.project`; the
      * browser claims about "the pixel over the channel is water" need it, and so will the raycast picking in Phase 4.

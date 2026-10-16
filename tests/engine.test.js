@@ -18,7 +18,12 @@ import {
   lampAtlasCells, lampAtlasImage, lampAtlasTexture, lampCellOf,
 } from '../src/engine/facades.js';
 import { PITCH_DEGREES_PER_100PX, ROTATE_DEGREES_PER_100PX, isRotateTrigger } from '../src/engine/gestures.js';
-import { pointInGeometry } from '../src/jingtai-data.js';
+import { insideRing } from '../src/buildings.js';
+
+// `pointInGeometry` 原来住在只服务景泰的那一册里，跟着场景一起撤了。这里两处取样要的只是
+// "在外环里、不在洞里"，所以直接借现版渲染用的那同一个 even-odd 射线判据。
+const pointInGeometry = (geometry, lng, lat) => polygonsOf(geometry)
+  .some((rings) => insideRing(rings[0], lng, lat) && !rings.slice(1).some((hole) => insideRing(hole, lng, lat)));
 
 const origin = SCENE.center;
 const project = createProjection(origin);
@@ -629,7 +634,7 @@ test('花城广场是绿轴、珠江公园在江北，绿地认得出自己', as
 });
 
 test('每个 kind 都点名归哪一档，不认识的不能被默认色糊过去', async () => {
-  const snapshots = await Promise.all(['canton-water', 'canton-greens', 'canton-blocks', 'jingtai-grounds'].map(surfaceOf));
+  const snapshots = await Promise.all(['canton-water', 'canton-greens', 'canton-blocks'].map(surfaceOf));
   const kinds = new Set();
   for (const snapshot of snapshots) for (const feature of snapshot.features) kinds.add(feature.properties.kind);
   for (const kind of [...kinds].sort()) assert.ok(TONE_OF_KIND[kind], `${kind} 没有配色档位`);

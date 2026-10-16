@@ -1,15 +1,6 @@
-import { DEFAULT_CENTER, SCENE, TOWER_OSM_ID } from './config.js';
+import { DEFAULT_CENTER, TOWER_OSM_ID } from './config.js';
 
-export const TOUR_STOPS = SCENE.id === 'jingtai' ? [
-  { name: '景泰小学（景泰校区）', bank: '校园', center: [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat], zoom: 16.7, pitch: 57, bearing: 0, osmId: 1178149399, sourceId: 'way/1178149399',
-    description: '从云龙路38号出发，查看校园真实边界；本次 OSM 快照的目标校园内无 pitch/track，未生成跑道。' },
-  { name: '三泰公园东苑', bank: '街区', center: [113.2634346, 23.1674743], zoom: 17.5, pitch: 50, bearing: -20, osmId: 337541381, sourceId: 'way/337541381',
-    description: '近看三泰公园东苑，镜头落在实际 OSM 公园多边形内部。' },
-  { name: '三泰公园西苑', bank: '街区', center: [113.2611534, 23.1676484], zoom: 17.5, pitch: 50, bearing: 25, osmId: 337541386, sourceId: 'way/337541386',
-    description: '转向三泰公园西苑，查看街区中的另一片真实公园绿地。' },
-  { name: '白云山林地边界', bank: '山脚', center: [113.2693872, 23.1707658], zoom: 16.6, pitch: 55, bearing: 70, osmId: 8249243, sourceId: 'relation/8249243',
-    description: '此处仅标示白云山的 OSM 林地边界，不是观景台，未重建三维高程；这是一程山脚镜头导览，不是步行路线。' },
-] : [
+export const TOUR_STOPS = [
   { name: '广州塔', bank: '南岸', center: [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat], zoom: 15.4, pitch: 58, bearing: -25, osmId: TOWER_OSM_ID,
     description: '从珠江南岸出发，隔江望向珠江新城。' },
   { name: '海心桥', bank: '江上', center: [113.314334, 23.1110888], zoom: 16, pitch: 45, bearing: 35, osmId: 1313608038,

@@ -100,16 +100,13 @@ function mixedIdTies(search) {
 
 test('mixed ID ties are input-independent, with numeric ways followed by lexical relation IDs', () => mixedIdTies(searchBuildings));
 
-test('the shipped school index finds named relations and preserves their IDs when downloaded', async () => {
-  const index = JSON.parse(await readFile(new URL('../public/data/jingtai-buildings-index.json', import.meta.url)));
-  const entries = await loadSearchIndex(response(index), '/data/jingtai-buildings-index.json');
-  for (const [name, id] of [
-    ['白云区少年宫', 'relation/4779478'],
-    ['万达广场C区1号写字楼', 'relation/5748957'],
-    ['万达广场C区3号写字楼', 'relation/5748958'],
-    ['广州体育馆', 'relation/10224102'],
-    ['云璟汇', 'relation/14113388'],
-  ]) assert.equal(searchBuildings(entries, name)[0].osmId, id, name);
+test('the shipped canton index keeps every id byte-for-byte through the download', async () => {
+  const index = JSON.parse(await readFile(new URL('../public/data/canton-buildings-index.json', import.meta.url)));
+  const entries = await loadSearchIndex(response(index), '/data/canton-buildings-index.json');
+  assert.deepEqual(entries.map((item) => item.osmId), index.entries.map((item) => item.osmId), '下载那一步改写了任何一条 id');
+  for (const [name, osmId] of [['广东省博物馆', 240896442], ['周大福金融中心', 511404889], ['广州图书馆', 240896441]]) {
+    assert.equal(searchBuildings(entries, name)[0].osmId, osmId, name);
+  }
 });
 
 test('in-memory tie-sort defects are caught by the mixed-ID assertions', async (t) => {

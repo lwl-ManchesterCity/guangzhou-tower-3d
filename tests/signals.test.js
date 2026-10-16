@@ -213,7 +213,7 @@ test('灯的秒表与车流是同一把：走一格变色，回 0 秒就是出�
   assert.equal(traffic.group.visible, false, '总开关没收到车那一组');
 });
 
-test('没有车的那一侧不造灯，景泰场景保持原样', () => {
+test('没有车的那一侧不造灯，一份路网输入都不给就保持原样', () => {
   const bare = createTrafficLife({ features: [], origin: DEFAULT_CENTER });
   assert.equal(bare.parts().signals, null, '没有车就没有灯，却造了一组空网格');
   assert.equal(bare.signals, null);

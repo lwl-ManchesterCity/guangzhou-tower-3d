@@ -78,7 +78,7 @@ export function createRiverSheen({ project, surfaces = [], tiles = riverTiles(),
     }
   }
   if (!parts.length) {
-    // 没有水系的那一侧（景泰）照样要交出同一个形状：读数是个函数、口令能喊、贴图不留在显存里。
+    // 交得出水面的那一格之外，这一层仍然要交出同一个形状：读数是个函数、口令能喊、贴图不留在显存里。
     for (const texture of Object.values(tiles)) texture.dispose();
     const idle = { faces: 0, plates: 0, failed, atmosphere, scroll: 0, tile: 0, rotate: 0, scale: 0,
       opacity: 0, vertices: 0, built: false };

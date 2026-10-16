@@ -3765,17 +3765,16 @@ test('river scroll and tower breath move nothing else, and stopping hands back t
     await page.waitForTimeout(250);
     const box = await page.evaluate(() => {
       const rect = selector => document.querySelector(selector).getBoundingClientRect();
-      const nav = rect('#scene-nav'), atmo = rect('#atmosphere-controls'), toggle = rect('#motion-toggle');
+      const atmo = rect('#atmosphere-controls'), toggle = rect('#motion-toggle');
       return {
         width: Math.round(toggle.width), height: Math.round(toggle.height), right: Math.round(atmo.right),
         visible: document.getElementById('motion-toggle').checkVisibility(),
-        gap: Math.round(atmo.left - nav.right), offscreen: atmo.right > innerWidth + 1 || toggle.right > innerWidth + 1,
+        offscreen: atmo.right > innerWidth + 1 || toggle.right > innerWidth + 1,
         hscroll: document.documentElement.scrollWidth > innerWidth,
       };
     });
     expect(box.visible, `${viewport.width}: the switch cannot disappear into the header`).toBe(true);
     expect(box.height, `${viewport.width}: the switch is smaller than a thumb`).toBeGreaterThanOrEqual(28);
-    expect(box.gap, `${viewport.width}: the switch has eaten the gap beside the scene links`).toBeGreaterThan(0);
     expect(box.offscreen, `${viewport.width}: the header runs off the screen`).toBe(false);
     expect(box.hscroll, `${viewport.width}: the header scrolls the page sideways`).toBe(false);
   }
@@ -3917,15 +3916,6 @@ test('night traffic burns only at night, marches twice a second, and stops with 
   await useLens('all');
   await page.waitForTimeout(400);
   expect((await read()).visibility, 'and handing the view back brings them back').toEqual(['visible', 'visible', 'visible']);
-
-  // The school scene has no traffic layers at all, so nothing there can march - and no bridge decks either, since the
-  // crossing snapshot is of the river.
-  await page.goto(`${appUrl}/?scene=jingtai`);
-  await expect(page.locator('#places-toggle')).toBeEnabled({ timeout: 60000 });
-  expect(await page.evaluate(async (TRAFFIC) => {
-    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
-    return [...TRAFFIC, 'bridge-decks', 'bridge-parapets'].map((id) => Boolean(neighborhood.map.getLayer(id)));
-  }, TRAFFIC), 'the school scene grew a street layer').toEqual([false, false, false, false, false]);
   expect(errors).toEqual([]);
 });
 
@@ -4493,14 +4483,6 @@ test('the near field puts vehicles on the streets, walkers on the paths, and sto
     neighborhood.map.getLayer('canton-tower').implementation.setTraffic(false);
   });
 
-  // The school scene has no near field at all: no snapshot, and no tower scene to stand it in.
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto(`${appUrl}/?scene=jingtai`);
-  await expect(page.locator('#places-toggle')).toBeEnabled({ timeout: 60000 });
-  expect(await page.evaluate(async () => {
-    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
-    return { near: neighborhood.nearTraffic(), tower: Boolean(neighborhood.map.getLayer('canton-tower')) };
-  }), 'the school scene grew a near field').toEqual({ near: null, tower: false });
   expect(CAR_HEIGHT_METRES, 'and a vehicle is a car-shaped 1.45 m, not a point').toBeGreaterThan(1);
   expect(errors).toEqual([]);
 });
@@ -4649,11 +4631,6 @@ test('the landmark labels open a card and fly to a camera that clears the roof',
   expect(narrow.tap[1]).toBeGreaterThanOrEqual(20);
   await page.locator('.landmark[data-osm-id="243319596"]').click();
   await expect(page.locator('.landmark-card')).toContainText('花城广场');
-
-  // The school scene has no landmarks, because none of these elements are in its two kilometres.
-  await page.goto(`${appUrl}/?scene=jingtai`);
-  await expect(page.locator('#places-toggle')).toBeEnabled({ timeout: 60000 });
-  expect(await page.locator('.landmark').count(), 'the school scene grew a landmark').toBe(0);
   expect(errors).toEqual([]);
 });
 
@@ -5065,12 +5042,6 @@ test('the tower turns colour at night, the beam only burns at night, and stoppin
   await page.locator('#motion-toggle').click();
   await expect.poll(async () => Buffer.compare(await shot(), shipped), { message: 'the cycle did not hand the tower back', timeout: 20000 })
     .toBe(0);
-
-  // The school scene has no tower, so it grows neither the control nor the beam.
-  await page.goto(`${appUrl}/?scene=jingtai`);
-  await expect(page.locator('#places-toggle')).toBeEnabled({ timeout: 60000 });
-  await settled(page);
-  expect(await page.locator('#tower-light').isHidden(), 'the school scene grew a tower-light switch').toBe(true);
   expect(errors).toEqual([]);
 });
 

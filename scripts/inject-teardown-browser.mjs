@@ -17,7 +17,7 @@ const cases = [
   ['引擎不还图集贴图（灯窗那张）', E, '      lampTexture.dispose();\n', ''],
   ['调用方不还车灯光晕贴图', B, '    sprite?.dispose();\n', ''],
   ['近场整组没挂进来（台账只量到引擎自己那几块）', B,
-    "  const sprite = sceneId === 'canton' ? trafficSprite() : null;", '  const sprite = false ? trafficSprite() : null;'],
+    '  const sprite = trafficSprite();', '  const sprite = null;'],
   ['装配器不喊船的 dispose', N, '      boats?.dispose();\n', ''],
   ['车那一组拆完不清空', T, '      props?.dispose();\n      group.clear();', '      props?.dispose();'],
   ['船那一组拆完不清空', 'src/waterlife.js', '      lights.material.dispose();\n      group.clear();', '      lights.material.dispose();'],

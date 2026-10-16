@@ -15,8 +15,8 @@ export function watchRemote(page, log = []) {
   });
   page.on('requestfailed', (request) => {
     if (!REMOTE.test(request.url())) return;
-    // `ERR_ABORTED` 不是宕机签名：换页会把上一页在飞的请求整批掐掉，景泰那条判据第一次就是这么被
-    // 误判成"外部不可用"的（实测点场景链接之后记下四条 tiles.openfreemap.org net::ERR_ABORTED）。
+    // `ERR_ABORTED` 不是宕机签名：换页会把上一页在飞的请求整批掐掉，这条判据第一次就是这么被
+    // 误判成"外部不可用"的（实测切页之后记下四条 tiles.openfreemap.org net::ERR_ABORTED）。
     // 真超时/DNS/连不上仍然记，那才是服务坏了。
     const reason = request.failure()?.errorText ?? '';
     if (reason.includes('ERR_ABORTED')) return;

@@ -5,8 +5,8 @@
 // 这几层就没了——新引擎的地面于是只剩道路与一条示意河带。所以按现版画的那几层，逐层从 OSM 取回真几何。
 //
 // 取的是**边界本身**，不做任何加工：闭合的 way 直接成环，multipolygon relation 按成员 way 的首尾端点拼接，
-// 接不上就整条报错、记进 skipped，绝不把开口两端连起来、绝不补坐标（`geometryFromElement` 本来就是这套规矩，
-// 与景泰那份快照共用同一个函数，不另写一份会漂的）。
+// 接不上就整条报错、记进 skipped，绝不把开口两端连起来、绝不补坐标（`geometryFromElement` 就是这套规矩，
+// 写在下面这一段，取数脚本自己带着，不依赖页面那侧的模块）。
 //
 // Usage:
 //   node scripts/prepare-canton-surface.mjs --fetch            # 取一次原始快照进 data/
@@ -15,9 +15,60 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { geometryFromElement } from '../src/jingtai-data.js';
+import { insideRing } from '../src/buildings.js';
 import { OVERPASS_ENDPOINTS } from '../src/config.js';
 import { plane } from '../src/geo.js';
+
+// OSM 元素 → Polygon/MultiPolygon。规矩只有一条：只认成员端点严丝合缝的环，接不上就报错，
+// 绝不把开口两端连起来、绝不补坐标。取数脚本自己带着这份规矩，不依赖页面那侧的任何模块。
+const samePoint = (a, b) => a?.[0] === b?.[0] && a?.[1] === b?.[1];
+const validPoint = (p) => p && Number.isFinite(p.lon) && Number.isFinite(p.lat) && Math.abs(p.lon) <= 180 && Math.abs(p.lat) <= 85;
+const ringArea = (ring) => ring.slice(1).reduce((sum, p, i) => sum + (ring[i][0] - ring[0][0]) * (p[1] - ring[0][1]) - (p[0] - ring[0][0]) * (ring[i][1] - ring[i - 1][1]), 0) / 2;
+const orient = (ring, outer) => (ringArea(ring) > 0) === outer ? ring : [...ring].reverse();
+
+function joinedRings(members) {
+  const segments = members.map((member) => {
+    if (!member.geometry?.length || !member.geometry.every(validPoint)) throw new Error('missing member geometry');
+    return member.geometry.map((p) => [p.lon, p.lat]);
+  });
+  const rings = [];
+  while (segments.length) {
+    let ring = segments.shift();
+    while (!samePoint(ring[0], ring.at(-1))) {
+      const next = segments.flatMap((segment, i) => samePoint(ring.at(-1), segment[0]) ? [{ i, reverse: false }] : samePoint(ring.at(-1), segment.at(-1)) ? [{ i, reverse: true }] : []);
+      if (next.length !== 1) throw new Error(next.length ? 'ambiguous member junction' : 'unclosed member chain');
+      const { i, reverse } = next[0];
+      let segment = segments.splice(i, 1)[0];
+      if (reverse) segment = [...segment].reverse();
+      ring = [...ring, ...segment.slice(1)];
+    }
+    if (ring.length < 4 || Math.abs(ringArea(ring)) < 1e-15) throw new Error('degenerate ring');
+    rings.push(ring);
+  }
+  return rings;
+}
+
+function geometryFromElement(element) {
+  if (element.type === 'way') {
+    const rings = joinedRings([{ geometry: element.geometry }]);
+    return { type: 'Polygon', coordinates: [orient(rings[0], true)] };
+  }
+  if (element.type !== 'relation' || element.tags?.type !== 'multipolygon') throw new Error('not a polygon/multipolygon');
+  if (element.members?.some((m) => m.type === 'relation' || m.type === 'node' && ['inner', 'outer'].includes(m.role))) throw new Error('unsupported nested/non-way polygon member');
+  const members = element.members?.filter((m) => m.type === 'way') ?? [];
+  if (members.some((m) => !['outer', 'inner', ''].includes(m.role))) throw new Error('unknown polygon member role');
+  const outers = joinedRings(members.filter((m) => m.role !== 'inner'));
+  const inners = joinedRings(members.filter((m) => m.role === 'inner'));
+  if (!outers.length) throw new Error('missing outer ring');
+  const polygons = outers.map((ring) => [orient(ring, true)]);
+  for (const inner of inners) {
+    const containers = outers.map((outer, i) => ({ outer, i })).filter(({ outer }) => inner.slice(0, -1).every(([lng, lat]) => insideRing(outer, lng, lat)));
+    if (!containers.length) throw new Error('hole outside outer ring');
+    containers.sort((a, b) => Math.abs(ringArea(a.outer)) - Math.abs(ringArea(b.outer)));
+    polygons[containers[0].i].push(orient(inner, false));
+  }
+  return polygons.length === 1 ? { type: 'Polygon', coordinates: polygons[0] } : { type: 'MultiPolygon', coordinates: polygons };
+}
 
 const CENTER = { lat: 23.109, lng: 113.31913 };
 const RADIUS_METRES = 3000;

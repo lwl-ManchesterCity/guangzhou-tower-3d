@@ -82,9 +82,9 @@ export function buildingHeight(tags) {
   const levels = numericTag(tags['building:levels']);
   const base = numericTag(tags.min_height) ?? (numericTag(tags['building:min_level']) ?? 0) * 3.2;
   // `levels` here means "the level count we had to derive the height from". The shared derivation keeps it that way on
-  // purpose: the景泰 product's promoted snapshot is pinned byte-for-byte to a build from before the count was ever
-  // carried, so the extra case - OSM naming a level count *beside* a `height` tag - is attached by the canton prep
-  // script, which is the only artifact that reads it (a shell's storey pitch).
+  // purpose: the promoted snapshot is pinned byte-for-byte to a build from before the count was ever carried, so the
+  // extra case - OSM naming a level count *beside* a `height` tag - is attached by the canton prep script, which is
+  // the only artifact that reads it (a shell's storey pitch).
   return { height: height ?? (levels ? levels * 3.2 : DEFAULT_BUILDING_HEIGHT), base, heightSource: height !== null ? 'height' : levels ? 'levels' : 'estimate', levels: height === null ? levels : null };
 }
 

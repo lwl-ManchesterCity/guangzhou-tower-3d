@@ -12,7 +12,7 @@ import { destination } from '../src/geo.js';
 
 const project = createProjection(SCENE.center);
 const snapshot = async (name) => (await JSON.parse(await readFile(new URL(`../public/data/${name}.geojson`, import.meta.url), 'utf8'))).features;
-// 与 `scene.js` 同一份拼法：水面＋绿地＋地块＋校园面，波光只认其中 `toneOf` 判成 water 的那批。
+// 与 `scene.js` 同一份拼法：水面＋绿地＋地块，波光只认其中 `toneOf` 判成 water 的那批。
 const surfacesOf = async () => [...await snapshot('canton-water'), ...await snapshot('canton-greens'), ...await snapshot('canton-blocks')];
 
 test('三档氛围各一张贴图，像素与现版那张逐字节相同', () => {
@@ -123,9 +123,11 @@ test('换氛围＝换采样那一张图并把格子放回出厂那一行', async
 });
 
 test('没有水面的那一侧照样造得出来、拆得干净，贴图不留在显存里', async () => {
-  const grounds = await snapshot('jingtai-grounds');
-  const river = createRiverSheen({ project, surfaces: grounds });
-  assert.equal(river.mesh, null, '景泰那侧没有水系，不该有波光网格');
+  // 喂给它的那批面里一个水系都没有（绿地＋地块），波光这一层就该整个不存在。
+  const dry = [...await snapshot('canton-greens'), ...await snapshot('canton-blocks')];
+  assert.equal(dry.filter((feature) => toneOf(feature) === 'water').length, 0, '这一份夹具里混进水面了');
+  const river = createRiverSheen({ project, surfaces: dry });
+  assert.equal(river.mesh, null, '一批面里没有水系，就不该有波光网格');
   assert.equal(river.group.children.length, 0);
   assert.equal(river.report().faces, 0);
   assert.equal(river.setView({ zoom: 16, bearing: 0, pixelRatio: 1, width: 800, height: 600 }), null);
@@ -135,7 +137,7 @@ test('没有水面的那一侧照样造得出来、拆得干净，贴图不留�
   const tiles = riverTiles();
   const fired = new Set();
   for (const texture of Object.values(tiles)) texture.addEventListener('dispose', () => fired.add(texture));
-  const idle = createRiverSheen({ project, surfaces: grounds, tiles });
+  const idle = createRiverSheen({ project, surfaces: dry, tiles });
   assert.equal(idle.mesh, null);
   assert.equal(fired.size, 3, `没有水面那一侧只还了 ${fired.size} 张贴图`);
 });

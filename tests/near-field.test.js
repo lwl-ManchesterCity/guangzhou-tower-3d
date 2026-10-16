@@ -224,7 +224,7 @@ test('没有路网的那一侧照样能拆，空跑一遍口令不报错', () =>
   assert.deepEqual(dry.groups, [], '没有路网就不该有任何组');
 });
 
-test('哪一组都造不出来时报 null，与景泰那侧同一个形状', () => {
+test('哪一组都造不出来时报 null，形状与有车那一侧一致', () => {
   const empty = createNearField({ origin: DEFAULT_CENTER });
   assert.equal(empty.readout(), null, '没有路网就没有近场，读数必须是 null 而不是半空的一格');
   assert.equal(empty.groups.length, 0);

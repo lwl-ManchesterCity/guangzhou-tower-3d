@@ -7,47 +7,38 @@ import { trafficSprite } from '../traffic-life.js';
 import { createNearField } from '../near-field.js';
 import { createBaseBands } from '../shadow-pads.js';
 
-// Which local snapshot feeds each layer, per scene. `canton-river.geojson`（那条按实测河宽描出的示意江带）从这里
+// Which local snapshot feeds each layer. `canton-river.geojson`（那条按实测河宽描出的示意江带）从这里
 // 退场了：Phase 1 取回真岸线之后水面改画 `canton-water.geojson`，示意带宽就没有存在的必要了，但现版引擎的落水
 // 色带还指着那个文件，所以文件本身留着。
 export const ENGINE_LAYERS = {
-  canton: { buildings: 'canton-buildings.geojson', streets: 'canton-streets.geojson',
-    water: 'canton-water.geojson', greens: 'canton-greens.geojson', blocks: 'canton-blocks.geojson',
-    river: 'canton-river.geojson', bridge: 'haixin-bridge.geojson' },
-  jingtai: { buildings: 'jingtai-buildings.geojson', streets: 'jingtai-roads.geojson', grounds: 'jingtai-grounds.geojson' },
+  buildings: 'canton-buildings.geojson', streets: 'canton-streets.geojson',
+  water: 'canton-water.geojson', greens: 'canton-greens.geojson', blocks: 'canton-blocks.geojson',
+  river: 'canton-river.geojson', bridge: 'haixin-bridge.geojson',
 };
 
-export async function bootThreeEngine({ container, base = '/data/', onError, sceneId = SCENE.id, ...rest }) {
-  const layers = ENGINE_LAYERS[sceneId] ?? {};
+export async function bootThreeEngine({ container, base = '/data/', onError, ...rest }) {
   const load = async (file) => {
-    if (!file) return [];
     const response = await fetch(`${base}${file}`);
     if (!response.ok) throw new Error(`${file} 未能加载（HTTP ${response.status}）`);
     return (await response.json()).features ?? [];
   };
-  const entries = await Promise.all(Object.entries(layers)
+  const entries = await Promise.all(Object.entries(ENGINE_LAYERS)
     .map(async ([key, file]) => [key, await load(file)]));
   // 近场三组（项 5 与江上的船）。算法、路网、米制原点与现版是同一份，所以这里不写第二套"车怎么摆"，也不写
   // 第二套开关：装配交给 `src/near-field.js`，谁在动由引擎这一侧的 120 ms 一拍说了算。
   // 车的高度还有一项来自桥：`crossings` 里那些 `part === 'deck'` 的件就是现版那两层挤出体的顶。
   // 引擎这一侧现在只画海心桥那一条桥面（壳体那一格，#190），其余跨江桥面还是平色路带——
   // 而这条规则是"同名继承"，把整份 `deckHeights` 传进来会让车站到一条没画的桥上去。
-  // 所以 `decks` 仍然不传，等其余桥面进引擎那天一起接（#192）。学校那侧没有路网快照，也没有塔，就是没有近场。
+  // 所以 `decks` 仍然不传，等其余桥面进引擎那天一起接（#192）。
   const streets = (entries.find(([key]) => key === 'streets') ?? [])[1] ?? [];
   const river = (entries.find(([key]) => key === 'river') ?? [])[1] ?? [];
   // 岸线用同一批 `water` 面，所以船的横向游移在窄的那条汊里会被夹回到水里。
   const shore = (entries.find(([key]) => key === 'water') ?? [])[1] ?? [];
   // 那颗光晕贴图由这里造、也由这里还：`traffic-life.js` 的 dispose 只管自己那批几何与材质，共用贴图归建它的那一方。
-  const sprite = sceneId === 'canton' ? trafficSprite() : null;
-  const nearField = sceneId === 'canton'
-    ? createNearField({ streets, river, shore, origin: SCENE.center ?? DEFAULT_CENTER, sprite })
-    : null;
+  const sprite = trafficSprite();
+  const nearField = createNearField({ streets, river, shore, origin: SCENE.center ?? DEFAULT_CENTER, sprite });
   // 楼根那一圈接地带：与现版共用 `src/shadow-pads.js`，所以两边的画面在这一格上是同一片影、同一个门控。
-  // 学校那侧仍然不给——它的画面是靠"一块色一个高度档"那套沙盘读法成立的（景泰那几轮判据按此校准），
-  // 给楼加影等于改它那套已被接受的观感，不在这一项里顺手做。
-  const bases = sceneId === 'canton'
-    ? createBaseBands({ features: (entries.find(([key]) => key === 'buildings') ?? [])[1] ?? [], origin: SCENE.center ?? DEFAULT_CENTER })
-    : null;
+  const bases = createBaseBands({ features: (entries.find(([key]) => key === 'buildings') ?? [])[1] ?? [], origin: SCENE.center ?? DEFAULT_CENTER });
   const engine = createEngineScene({ container, data: Object.fromEntries(entries), nearField, bases, ...rest });
   const gesture = attachRotate({ canvas: engine.canvas, rig: engine.rig });
   const dispose = engine.dispose;
