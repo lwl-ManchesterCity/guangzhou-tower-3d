@@ -10,6 +10,7 @@ import { mapIcon } from './icons.js';
 import { poisGeoJSON } from './pois.js';
 import { TOWER_MODES, createTowerLayer, towerBreath, towerHue } from './tower.js';
 import { createTour, TOUR_STOPS } from './tour.js';
+import { createFilm, filmFrame } from './film.js';
 import { heightColor, heightSummary, lensFilter, UNKNOWN_HEIGHT_COLOR } from './lens.js';
 import { schematicDisplayHeights } from './block-layout.js';
 import { FACADE_SHAPES, FACADE_THEMES, GLOW_IMAGE_PREFIX, GLOW_NEAR_IMAGE_PREFIX, LAMP_ALT_IMAGE_PREFIX, LAMP_NEAR_ALT_IMAGE_PREFIX, LAMP_GROUPS, LAMP_KEYS, LAMP_PERIODS_MS, LIGHT_BANDS, LIGHT_FADES, LIGHT_IMAGE_PREFIX, LIGHT_NEAR_IMAGE_PREFIX, LIGHT_NEAR_ZOOM, LIGHT_TEMPERATURES, WINDOWS_OFF_IMAGE, facadeImage, facadeOptions, facadePattern, facadeTexture, glowTexture, lampBreather, lampDarkness, lampTemperatureDeal, lampWeight, lightTexture, lampBandExpression, windowsOffTile } from './facade.js';
@@ -84,7 +85,7 @@ function neighborhoodStyle(style) {
   return style;
 }
 
-export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInteraction, onTourChange, onLensChange, onMotionChange, onError }) {
+export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInteraction, onTourChange, onFilmChange, onLensChange, onMotionChange, onError }) {
   const [response, buildingsResponse, bridgeResponse, crossingsResponse, riverResponse, streetsResponse, greensResponse, blocksResponse, waterResponse] = await Promise.all([
     fetch(MAP_STYLE_URL, { signal: AbortSignal.timeout(25000) }),
     fetch(`${import.meta.env.BASE_URL}data/${SCENE.buildings}`, { signal: AbortSignal.timeout(25000) }),
@@ -145,6 +146,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   });
   let frame, previousTime, popup, selectedPoiId, cardBlock;
   let orbiting = false, poiFeatures = [], activeFilter = 'all';
+  let film, filmSaved, filmShot = -1;
   let lens = { mode: 'use', category: 'all', source: 'all' }, atmosphereId = 'day';
   // The clock of an atmosphere walk in progress: which theme the picture on screen came from, which one it was heading
   // for, how far it had got, and whether the patterns had been swapped yet.
@@ -156,7 +158,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // replaceState is rate limited by the browser and orbit rewrites it every frame, so the address bar only follows a
   // camera that actually stopped somewhere.
   function writeHash() {
-    if (orbiting) return;
+    if (orbiting || film?.active) return;
     const hash = formatView({ zoom: map.getZoom(), center: map.getCenter(), bearing: map.getBearing(), pitch: map.getPitch() }, selection);
     if (hash === lastHash) return;
     lastHash = hash;
@@ -1176,12 +1178,64 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     return { ...greenery.report, visible: greenery.group.visible, minZoom: TREE_MIN_ZOOM, zoom: map.getZoom() };
   }
   function motionPreference() { setMotion(!reducedMotion.matches); }
-  function manualInteraction() { stopOrbit(); tour.exit(); onInteraction(); }
-  function visibilityChange() { if (document.hidden) manualInteraction(); }
+  film = createFilm({
+    draw(elapsed) {
+      const view = filmFrame(elapsed, { width: innerWidth, height: innerHeight });
+      if (filmShot !== view.index) {
+        setAtmosphere(view.shot.mood, { instant: reducedMotion.matches || filmShot < 0, duration: 3200 });
+        filmShot = view.index;
+      }
+      map.jumpTo(view.camera);
+    },
+    onChange: (state) => onFilmChange?.(state),
+    onExit() {
+      if (!filmSaved) return;
+      const saved = filmSaved;
+      filmSaved = undefined;
+      setAtmosphere(saved.mood, { instant: true });
+      // setSky only compares supplied keys, so omitted transition keys need an explicit reset.
+      map.setSky({ 'sky-color-transition': undefined, 'horizon-color-transition': undefined, 'fog-color-transition': undefined, ...saved.sky });
+      lens = saved.lens;
+      applyLens();
+      for (const [id, visibility] of saved.layers) map.setLayoutProperty(id, 'visibility', visibility);
+      if (saved.width !== innerWidth || saved.height !== innerHeight) {
+        saved.camera.padding = lens.mode === 'height' ? lensPadding() : padding();
+        if (landscape()) saved.camera.zoom = Math.min(saved.camera.zoom, SCENE.camera.landscapeZoom);
+      }
+      map.jumpTo(saved.camera);
+    },
+  });
+  function startFilm() {
+    if (film.active) return;
+    tour.exit(); stopOrbit(); cancelFocus(); popup?.remove(); map.stop();
+    filmSaved = {
+      camera: { center: map.getCenter().toArray(), zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), padding: map.getPadding() },
+      width: innerWidth, height: innerHeight,
+      lens: { ...lens }, mood: atmosphereId, sky: map.getSky(),
+      layers: map.getStyle().layers.filter((layer) => layer.type === 'symbol' || layer.id === 'radius-line')
+        .map((layer) => [layer.id, map.getLayoutProperty(layer.id, 'visibility') ?? 'visible']),
+    };
+    resetLens();
+    for (const [id] of filmSaved.layers) map.setLayoutProperty(id, 'visibility', 'none');
+    filmShot = -1;
+    film.start(reducedMotion.matches);
+  }
+  function manualInteraction() { stopOrbit(); tour.exit(); film.exit(); onInteraction(); }
+  function visibilityChange() {
+    if (!document.hidden) return;
+    if (film.active) film.pause();
+    else manualInteraction();
+  }
+  function preferenceInteraction() {
+    stopOrbit(); tour.exit();
+    if (reducedMotion.matches && film.active) { film.reduce(); settleAtmosphere(); }
+    onInteraction();
+  }
   let wasLandscape = landscape();
   function resize() {
     const isLandscape = landscape();
-    if (tour.active) tour.reframe();
+    if (film.active) film.reframe();
+    else if (tour.active) tour.reframe();
     else if (lens.mode === 'height') map.setPadding(lensPadding());
     else {
       map.setPadding(padding());
@@ -1352,19 +1406,25 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   });
   for (const event of ['movestart', 'dragstart', 'zoomstart', 'rotatestart', 'pitchstart']) map.on(event, (data) => { if (data.originalEvent) manualInteraction(); });
   document.addEventListener('visibilitychange', visibilityChange);
-  reducedMotion.addEventListener('change', manualInteraction);
+  reducedMotion.addEventListener('change', preferenceInteraction);
   reducedMotion.addEventListener('change', motionPreference);
   window.addEventListener('resize', resize);
   map.on('remove', () => {
+    filmSaved = undefined;
+    film.exit();
     tour.exit();
     stopOrbit();
     motion.on = false;
     cancelAnimationFrame(motion.frame);
+    cancelAnimationFrame(moodRun?.frame);
+    moodRun = undefined;
+    cancelAnimationFrame(hazeReveal);
+    hazeReveal = undefined;
     cancelAnimationFrame(hoverFrame);
     cancelAnimationFrame(plateFrame);
     clearTimeout(focus?.timer);
     document.removeEventListener('visibilitychange', visibilityChange);
-    reducedMotion.removeEventListener('change', manualInteraction);
+    reducedMotion.removeEventListener('change', preferenceInteraction);
     reducedMotion.removeEventListener('change', motionPreference);
     window.removeEventListener('resize', resize);
     map.getCanvas().removeEventListener('wheel', manualInteraction);
@@ -1433,7 +1493,9 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     get lens() { return { ...lens }; },
     buildingSummary: (category = 'all') => heightSummary(buildings.features, category),
     tour,
-    startTour() { stopOrbit(); cancelFocus(); popup?.remove(); resetLens(); tour.start(!reducedMotion.matches); },
+    film,
+    startFilm,
+    startTour() { film.exit(); stopOrbit(); cancelFocus(); popup?.remove(); resetLens(); tour.start(!reducedMotion.matches); },
     setPanelOpen(open) { panelOpen = open; popup?.remove(); manualInteraction(); map.setLayoutProperty('poi-markers', 'visibility', open ? 'visible' : 'none'); map.easeTo({ padding: padding(), duration: reducedMotion.matches ? 0 : 400 }); },
     setPois(pois, category = 'all') {
       poiFeatures = pois; activeFilter = category;
@@ -1458,16 +1520,16 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     },
     focusBuilding,
     startOrbit() {
-      tour.exit(); stopOrbit(); popup?.remove(); map.stop(); cancelFocus();
+      film.exit(); tour.exit(); stopOrbit(); popup?.remove(); map.stop(); cancelFocus();
       map.jumpTo({ center, zoom: landscape() ? Math.max(14, Math.min(map.getZoom(), 14.4)) : Math.max(14.6, Math.min(map.getZoom(), 15.7)), pitch: 58, padding: padding() });
       orbiting = true; frame = requestAnimationFrame(animate);
     },
     stopOrbit,
     hasCard: () => Boolean(popup),
     closeCard() { popup?.remove(); },
-    recenter() { tour.exit(); stopOrbit(); cancelFocus(); popup?.remove(); map.flyTo({ ...heroCamera(), duration: reducedMotion.matches ? 0 : 1200 }); },
+    recenter() { film.exit(); tour.exit(); stopOrbit(); cancelFocus(); popup?.remove(); map.flyTo({ ...heroCamera(), duration: reducedMotion.matches ? 0 : 1200 }); },
     overview() {
-      tour.exit(); stopOrbit(); cancelFocus(); popup?.remove();
+      film.exit(); tour.exit(); stopOrbit(); cancelFocus(); popup?.remove();
       const points = circle.geometry.coordinates[0];
       const bounds = points.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
       // fitBounds adds its own padding to the current transform padding.

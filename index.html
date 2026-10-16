@@ -41,7 +41,20 @@
         <div class="intro-actions">
           <button id="tour-start" class="text-button" aria-controls="tour-player" disabled><span id="tour-start-label">导览</span> <span aria-hidden="true">→</span></button>
           <button id="overview-button" class="text-button" disabled>看全范围 <span aria-hidden="true">↗</span></button>
+          <button id="film-start" class="text-button" aria-controls="film-player" disabled>播放宣传片 <span aria-hidden="true">▷</span></button>
         </div>
+      </section>
+      <section id="film-player" class="film-player" role="dialog" aria-modal="true" aria-label="广州·一江两岸宣传片" aria-describedby="film-help" hidden>
+        <header class="film-masthead"><span>广州 <i>·</i> GUANGZHOU</span><span class="film-edition">一江两岸 / 城市短片</span></header>
+        <div class="film-caption" aria-live="polite" aria-atomic="true"><p id="film-chapter"></p><p id="film-caption"></p></div>
+        <footer class="film-footer">
+          <div class="film-progress" aria-hidden="true"><i id="film-progress"></i></div>
+          <span id="film-time" class="film-time" aria-hidden="true">00:00 / 00:48</span>
+          <p id="film-help">Esc / 空格 跳过</p>
+          <button id="film-play" type="button">暂停</button>
+          <button id="film-exit" type="button">跳过宣传片 <span aria-hidden="true">→</span></button>
+          <small class="film-credit">© OpenStreetMap contributors · OpenFreeMap · 示意建模 / 艺术化氛围</small>
+        </footer>
       </section>
       <section id="tour-player" class="tour-player" aria-label="一塔两岸主题导览" hidden>
         <ol id="tour-route" class="tour-route" aria-label="镜头路线"></ol>

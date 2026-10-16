@@ -9,6 +9,7 @@ import { createNeighborhoodMap } from './map.js';
 import { createPoiService } from './pois.js';
 import { loadSearchIndex, searchBuildings } from './search.js';
 import { TOUR_STOPS } from './tour.js';
+import { FILM_DURATION, FILM_SHOTS, filmFrame } from './film.js';
 import { HEIGHT_BINS } from './lens.js';
 
 const $ = (id) => document.getElementById(id);
@@ -78,6 +79,49 @@ function setExploreMode() {
   $('explore-button').setAttribute('aria-pressed', 'true');
   $('orbit-button').setAttribute('aria-pressed', 'false');
 }
+
+let filmInert = [], filmChapter = -1, filmCaptionAnimation;
+function renderFilm({ active, playing, reduced, elapsed }) {
+  const wasActive = !$('film-player').hidden;
+  $('film-player').hidden = !active;
+  document.body.dataset.film = active ? 'open' : 'closed';
+  if (!active || reduced) filmCaptionAnimation?.cancel();
+  if (active && !wasActive) {
+    filmInert = [...$('app').children].filter((node) => !['film-player', 'map-error'].includes(node.id)).map((node) => [node, node.inert]);
+    for (const [node] of filmInert) node.inert = true;
+    filmChapter = -1;
+    $('film-play').focus({ preventScroll: true });
+  }
+  if (!active) {
+    for (const [node, inert] of filmInert) node.inert = inert;
+    filmInert = [];
+    if (wasActive) $('film-start').focus({ preventScroll: true });
+    return;
+  }
+  const view = filmFrame(elapsed, { width: innerWidth, height: innerHeight });
+  $('film-player').style.setProperty('--film-bar', `${view.bar}px`);
+  $('film-progress').style.transform = `scaleX(${elapsed / FILM_DURATION})`;
+  const seconds = String(Math.floor(elapsed / 1000)).padStart(2, '0');
+  $('film-time').textContent = `00:${seconds} / 00:48`;
+  $('film-play').textContent = reduced ? (view.index === FILM_SHOTS.length - 1 ? '完成' : '下一幕') : playing ? '暂停' : '继续';
+  $('film-help').textContent = reduced ? '已减弱动态 · 逐幕查看' : 'Esc / 空格 跳过';
+  if (filmChapter !== view.index) {
+    filmChapter = view.index;
+    $('film-chapter').textContent = `${String(view.index + 1).padStart(2, '0')} / ${String(FILM_SHOTS.length).padStart(2, '0')}　${view.shot.title}`;
+    $('film-caption').textContent = view.shot.caption;
+    filmCaptionAnimation?.cancel();
+    if (!reduced) filmCaptionAnimation = $('film-caption').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 900 });
+  }
+}
+function startFilm() {
+  if (placesOpen) togglePlaces(false);
+  if (searchOpen()) toggleSearch(false);
+  setExploreMode();
+  neighborhood.startFilm();
+}
+$('film-start').addEventListener('click', startFilm);
+$('film-play').addEventListener('click', () => neighborhood.film.toggle());
+$('film-exit').addEventListener('click', () => neighborhood.film.exit());
 
 for (const stop of TOUR_STOPS) $('tour-route').append(element('li', '', stop.name));
 function renderTour({ index, playing, travelling }) {
@@ -408,6 +452,15 @@ $('orbit-button').addEventListener('click', () => { neighborhood.startOrbit(); $
 $('recenter-button').addEventListener('click', () => { neighborhood.recenter(); setExploreMode(); });
 $('overview-button').addEventListener('click', () => { neighborhood.overview(); setExploreMode(); });
 document.addEventListener('keydown', (event) => {
+  if (neighborhood?.film?.active) {
+    if (event.key === 'Escape' || event.code === 'Space') { event.preventDefault(); neighborhood.film.exit(); }
+    else if (event.key === 'Tab') {
+      event.preventDefault();
+      const controls = [$('film-play'), $('film-exit')];
+      controls[(controls.indexOf(document.activeElement) + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus();
+    }
+    return;
+  }
   if (event.key !== 'Escape') return;
   if (neighborhood?.tour.active) return neighborhood.tour.exit();
   if (neighborhood?.hasCard()) return neighborhood.closeCard();
@@ -436,6 +489,7 @@ try {
       ['places-toggle', '地点清单还没接进这一侧'],
       ['search-toggle', '楼名与地址检索还没接进这一侧'],
       ['tour-start', '导览走的是逐栋飞镜头，这一侧还没有可点的楼块'],
+      ['film-start', '宣传片使用现版完整场景，请回到不带 engine 参数的页面观看'],
       ['explore-button', '这一侧的视角由拖动直接控制，没有探索/环绕两档'],
       ['orbit-button', '这一侧的视角由拖动直接控制，没有探索/环绕两档'],
     ]) {
@@ -476,6 +530,7 @@ try {
       onBuildingClick: showBuilding,
       onInteraction: setExploreMode,
       onTourChange: renderTour,
+      onFilmChange: renderFilm,
       onLensChange: renderLens,
       onMotionChange: renderMotion,
       onError: () => {
@@ -484,8 +539,9 @@ try {
       },
     });
     $('map-message').hidden = true;
-    for (const button of document.querySelectorAll('#places-toggle, #search-toggle, #overview-button, #tour-start, #view-controls button, #atmosphere-controls button, #tower-light button, .scene-key button')) button.disabled = false;
+    for (const button of document.querySelectorAll('#places-toggle, #search-toggle, #overview-button, #tour-start, #film-start, #view-controls button, #atmosphere-controls button, #tower-light button, .scene-key button')) button.disabled = false;
     renderLens(neighborhood.lens, neighborhood.buildingSummary());
+    if (new URLSearchParams(location.search).get('film') === '1') startFilm();
   }
 } catch (error) {
   $('map-message').hidden = true;
