@@ -32,6 +32,22 @@
 
 ## 广州塔：从平面轮廓到能看出立面
 
+### 宣传片补上 README 素材：一张会自己动的 GIF、48 秒正片与六张分镜（2026-10-16）
+
+![广州 · 一江两岸｜六幕预览](docs/film/guangzhou-film.gif)
+
+上面这段 9 秒 GIF 是六幕各截 1.2 秒接起来的。**GitHub 的 README 不内嵌仓库里的 mp4**——`<video>` 标签会被过滤掉，只剩一条下载链接——所以能直接看到的是 GIF；完整 48 秒正片（1280×720、无音轨）在 [`docs/film/guangzhou-film.mp4`](docs/film/guangzhou-film.mp4)。页面入口：`?film=1` 自动进片，或点顶栏的「播放宣传片」。
+
+| 01 江城初见 · 白昼 | 02 双塔入云 · 白昼 | 03 花城中轴 · 日落 |
+| --- | --- | --- |
+| ![江城初见](docs/screenshots/canton-film-01-city.png) | ![双塔入云](docs/screenshots/canton-film-02-twins.png) | ![花城中轴](docs/screenshots/canton-film-03-axis.png) |
+| 04 步过珠江 · 日落 | 05 小蛮腰亮起 · 夜景 | 06 一江两岸 · 夜景 |
+| ![步过珠江](docs/screenshots/canton-film-04-bridge.png) | ![小蛮腰亮起](docs/screenshots/canton-film-05-tower.png) | ![一江两岸](docs/screenshots/canton-film-06-banks.png) |
+
+**素材怎么来的。** 新增一次性脚本 `scripts/shot-film-assets.mjs`（与既有的 `shot-*.mjs` 同一套）。六张静帧不另摆镜头：进片后等时间走到那一幕，按 `#film-play` 把这一帧钉住再拍，拍到的就是观众看到的那一帧。正片整段录下来按 48 秒从尾巴上截——前头的加载时间自然被切掉（本轮 webm 总长 55.2 s，起截 7.2 s），抽两帧核对过对齐（0.5 s 落在第 1 幕、32.5 s 落在第 5 幕）。GIF 再从正片里截六段拼起来。录制、转码、拼图都走本机 ffmpeg，重跑一条命令即可复现。
+
+**这一节的数。** 新增 3 类产物：`docs/film/` 2 份（正片 14.4 MB、GIF 5.5 MB）与 `docs/screenshots/` 6 张分镜（合计 6.6 MB），另加脚本 `scripts/shot-film-assets.mjs` 一份。`src/`、`tests/`、数据快照与图层本轮一字未动。
+
 ### 导览从四站加到八站：多出来的四站直接读地标表，路线条按站数收名字（2026-10-16）
 
 用户问「这四站导览能不能做多几站，你看看怎么设计」，我给了三条并排的建议，他回「按照你说的做」。三条是：**① 路线条改成"只留当前那一站的名字"；② 站点表从 4 加到 8；③ 只动现版这一侧**——`?engine=three` 那一侧还没有导览，`src/main.js` 里那句边界说明（「还缺 树、点击出卡片、检索与导览」）本轮一字未改，"边界不许说谎"那条判据仍在盯它。
