@@ -1627,6 +1627,10 @@ const tourStops = [
   ['海心桥', [113.314334, 23.1110888], 35],
   ['花城广场', [113.319181, 23.122579], 180],
   ['广州图书馆', [113.3206608, 23.1189093], 35],
+  ['广东省博物馆', [113.321145, 23.117494], 20],
+  ['广州西塔', [113.317861, 23.120317], 270],
+  ['广州东塔', [113.320579, 23.12026], 90],
+  ['猎德大桥', [113.328447, 23.113333], 80],
 ];
 async function atTourStop(page, index) {
   await expect(page.locator('#tour-title')).toHaveText(tourStops[index][0], { timeout: 12000 });
@@ -1636,10 +1640,21 @@ async function atTourStop(page, index) {
   expect(Math.abs(((camera.bearing - tourStops[index][2] + 540) % 360) - 180)).toBeLessThan(0.01);
   await expect(page.locator('#tour-route [aria-current="step"]')).toHaveText(tourStops[index][0]);
 }
+// 路线条上站名的实际宽度：font-size 0 那些站名量出来就是 0，只有当前这一站的名字量得到宽度。
+const routeStrip = (page) => page.evaluate(() => {
+  const player = document.querySelector('#tour-player').getBoundingClientRect();
+  const rows = [...document.querySelectorAll('#tour-route li')].map((item) => {
+    const range = document.createRange();
+    range.selectNodeContents(item);
+    const box = item.getBoundingClientRect();
+    return { name: range.getBoundingClientRect().width, current: item.getAttribute('aria-current') === 'step', right: box.right, left: box.left };
+  });
+  return { count: rows.length, named: rows.filter((row) => row.name > 0.5).length, namedIsCurrent: rows.filter((row) => row.name > 0.5).every((row) => row.current), outside: rows.filter((row) => row.right > player.right + 0.5 || row.left < player.left - 0.5).length, spread: rows.at(-1).right - rows[0].left };
+});
 
-test('guided tour plays four real stops and finishes without a reset or extra data queries', async ({ page }) => {
+test('guided tour plays eight real stops and finishes without a reset or extra data queries', async ({ page }) => {
 
-  test.setTimeout(100000);
+  test.setTimeout(240000);
   const errors = [], requests = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (['error', 'warning'].includes(message.type())) errors.push(message.text()); });
@@ -1652,8 +1667,9 @@ test('guided tour plays four real stops and finishes without a reset or extra da
   await page.locator('#tour-start').click();
   await expect(page.locator('#tour-play')).toBeFocused();
   for (const selector of ['.scene-intro', '.scene-key', '#view-controls', '.topbar-actions', '.gesture-hint']) await expect(page.locator(selector)).toBeHidden();
-  await expect(page.locator('#tour-route li')).toHaveCount(4);
-  for (let index = 0; index < 4; index++) {
+  await expect(page.locator('#tour-route li')).toHaveCount(tourStops.length);
+  await expect(page.locator('#tour-start-label')).toHaveText(`${tourStops.length} 站导览`);
+  for (let index = 0; index < tourStops.length; index++) {
     await atTourStop(page, index);
     await settled(page);
     await expect(page.locator('.tour-marker')).toHaveCount(1);
@@ -1662,8 +1678,8 @@ test('guided tour plays four real stops and finishes without a reset or extra da
   }
   await expect(page.locator('#tour-player')).toBeHidden({ timeout: 10000 });
   const last = await tourCamera(page);
-  expect(last.center[0]).toBeCloseTo(tourStops[3][1][0], 5);
-  expect(last.center[1]).toBeCloseTo(tourStops[3][1][1], 5);
+  expect(last.center[0]).toBeCloseTo(tourStops.at(-1)[1][0], 5);
+  expect(last.center[1]).toBeCloseTo(tourStops.at(-1)[1][1], 5);
   await expect(page.locator('#tour-start')).toBeFocused();
   await expect(page.locator('#view-controls')).toBeVisible();
   await expect(page.locator('.tour-marker')).toHaveCount(0);
@@ -1739,7 +1755,7 @@ test('guided tour pauses in flight and yields to Escape, gestures, keyboard and 
 });
 
 test('guided tour keeps all stops clear on narrow screens and defaults to manual with reduced motion', async ({ page }) => {
-  test.setTimeout(120000);
+  test.setTimeout(360000);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openMap(page);
   for (const [width, height] of [[320, 568], [390, 844], [568, 320], [844, 390], [1024, 768]]) {
@@ -1747,7 +1763,7 @@ test('guided tour keeps all stops clear on narrow screens and defaults to manual
     await page.locator('#tour-start').click();
     await expect(page.locator('#tour-play')).toHaveText('继续');
     await expect(page.locator('#tour-previous')).toBeDisabled();
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < tourStops.length; index++) {
       await atTourStop(page, index);
       await settled(page);
       const layout = await page.evaluate(() => {
@@ -1762,14 +1778,19 @@ test('guided tour keeps all stops clear on narrow screens and defaults to manual
       expect(layout.outside, `${width}x${height} stop ${index}`).toBe(0);
       expect(layout.covered, `${width}x${height} stop ${index}`).toBe(0);
       expect(layout.markerCovered, `${width}x${height} stop ${index}`).toBe(0);
+      const route = await routeStrip(page);
+      expect(route.count).toBe(tourStops.length);
+      expect(route.named, `${width}x${height} stop ${index}：八站挤在一条线上，只该留当前那一站的名字`).toBe(1);
+      expect(route.namedIsCurrent, `${width}x${height} stop ${index}：留下来那个名字必须就是当前这一站`).toBe(true);
+      expect(route.outside, `${width}x${height} stop ${index}：路线条不许伸出播放条`).toBe(0);
       if (width === 320) expect(layout.playerHeight).toBeLessThan(180);
       if (index === 0) await page.screenshot({ path: `/tmp/canton-tour-mobile-${width}.png` });
-      if (index < 3) await page.locator('#tour-next').click();
+      if (index < tourStops.length - 1) await page.locator('#tour-next').click();
     }
     await page.locator('#tour-previous').click();
-    await atTourStop(page, 2);
+    await atTourStop(page, tourStops.length - 2);
     await page.locator('#tour-next').click();
-    await atTourStop(page, 3);
+    await atTourStop(page, tourStops.length - 1);
     await expect(page.locator('#tour-next')).toHaveText('完成导览');
     await page.locator('#tour-next').click();
     await expect(page.locator('#tour-player')).toBeHidden();

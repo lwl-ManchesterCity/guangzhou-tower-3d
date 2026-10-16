@@ -359,10 +359,14 @@ body[data-atmosphere='night'] :is(.poi-status.is-error, .search-status.is-error)
 }
 .intro-actions { display: flex; gap: 19px; }
 .intro-actions .text-button span { margin-left: 6px; }
+#tour-start-label { margin-left: 0; }
 #tour-start { color: var(--accent); font-weight: 600; }
 .tour-player { position: absolute; z-index: 4; bottom: 48px; left: 50%; transform: translateX(-50%); width: 560px; padding: 18px 22px 13px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 30px #142c3d18; }
 .tour-route { display: flex; margin: 4px 0 13px; padding: 0; list-style: none; }
 .tour-route li { position: relative; flex: 1; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; white-space: nowrap; }
+/* 长路线（超过六站）：非当前站的站名收掉、只留圆点，当前那一站的名字自带宽度不跟别的格分。 */
+.tour-route.is-long li { font-size: 0; line-height: 12px; }
+.tour-route.is-long li[aria-current='step'] { flex: 0 0 auto; margin-right: 10px; font-size: 10px; }
 .tour-route li::before { content: ''; position: absolute; top: -3px; left: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--line); }
 .tour-route li[aria-current='step'] { color: var(--accent); font-weight: 600; }
 .tour-route li[aria-current='step']::before { background: var(--accent); box-shadow: 0 0 0 3px var(--selected); }

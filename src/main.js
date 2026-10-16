@@ -19,7 +19,12 @@ const radiusKm = SCENE.radius / 1000;
 const service = createPoiService();
 document.body.dataset.scene = SCENE.id;
 document.title = `街区切片 · ${SCENE.title}`;
+// 路线条上站名的宽度是有限的：桌面那 560 px 面板八站各占 66 px、手机 320 px 那档只剩 35 px，
+// 五个字的站名在那里一定压到邻格，所以超过六站就只给当前这一站留名字，其余只留那颗圆点。
+const LONG_ROUTE_STOPS = 6;
+$('tour-route').classList.toggle('is-long', TOUR_STOPS.length > LONG_ROUTE_STOPS);
 $('tour-route').setAttribute('aria-label', `${TOUR_STOPS.length} 站镜头路线`);
+$('tour-start-label').textContent = `${TOUR_STOPS.length} 站导览`;
 for (const [category, color] of Object.entries(ATMOSPHERES[document.body.dataset.atmosphere].buildings)) document.querySelector(`#building-legend .${category}`).style.backgroundColor = color;
 $('coordinates').textContent = `${formatCoordinates(DEFAULT_CENTER)} / WGS 84`;
 let pois = [], totalPois = 0, filter = 'all', poiState = 'idle', placesOpen = false;

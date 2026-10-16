@@ -6,9 +6,33 @@ import { Worker } from 'node:worker_threads';
 import * as tourModule from '../src/tour.js';
 import { DEFAULT_CENTER, RADIUS_METERS, TOWER_OSM_ID } from '../src/config.js';
 import { distanceMeters } from '../src/geo.js';
+import { LANDMARKS } from '../src/landmarks.js';
 
 const DWELL = 7000; // Deliberately independent of the implementation's exported delay.
 const localIndex = JSON.parse(readFileSync(new URL('../public/data/canton-buildings-index.json', import.meta.url), 'utf8'));
+
+// The two bridge files the scene draws: a stop standing on a deck has to name one of their rows, not a coordinate
+// someone typed. 100 m is the ceiling for "this stop is on the element it names": the closest two elements any two
+// stops name are the library and the museum 165 m apart, so a stop that lands on its neighbour's anchor fails here.
+const STOP_ANCHOR_TOLERANCE = 100;
+const bridgeParts = JSON.parse(readFileSync(new URL('../public/data/canton-bridges.geojson', import.meta.url), 'utf8')).features;
+const haixinBridge = JSON.parse(readFileSync(new URL('../public/data/haixin-bridge.geojson', import.meta.url), 'utf8')).features;
+
+const bboxCentre = (features) => {
+  const points = features.flatMap((feature) => feature.geometry.coordinates[0] ?? feature.geometry.coordinates);
+  const lngs = points.map(([lng]) => lng), lats = points.map(([, lat]) => lat);
+  return [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2];
+};
+
+// Where each element the scene ships says it is. The landmark table wins over the building index because that is the
+// row the nameplate, the card and 飞过去 read, and a stop is a camera pointed at exactly that building.
+const shippedAnchors = new Map();
+for (const entry of localIndex.entries) shippedAnchors.set(entry.osmId, { source: 'canton-buildings-index.json', centre: [entry.lng, entry.lat] });
+for (const feature of haixinBridge) shippedAnchors.set(feature.properties.osmId, { source: 'haixin-bridge.geojson', centre: bboxCentre([feature]) });
+for (const osmId of new Set(bridgeParts.map((feature) => feature.properties.osmId))) {
+  shippedAnchors.set(osmId, { source: 'canton-bridges.geojson', centre: bboxCentre(bridgeParts.filter((feature) => feature.properties.osmId === osmId)) });
+}
+for (const landmark of LANDMARKS) shippedAnchors.set(landmark.osmId, { source: 'src/landmarks.js', centre: landmark.center });
 
 class MapStub extends EventEmitter {
   flights = [];
@@ -108,13 +132,19 @@ const behaviors = {
   stops(t, implementation) {
     const { TOUR_STOPS: stops, TOUR_DWELL_MS } = implementation;
     assert.equal(TOUR_DWELL_MS, DWELL);
-    assert.equal(stops.length, 4);
+    assert.equal(stops.length, 8);
     assert.deepEqual(stops.map(({ name, bank, osmId }) => ({ name, bank, osmId })), [
       { name: '广州塔', bank: '南岸', osmId: TOWER_OSM_ID },
       { name: '海心桥', bank: '江上', osmId: 1313608038 },
       { name: '花城广场', bank: '北岸', osmId: 243319596 },
       { name: '广州图书馆', bank: '北岸', osmId: 240896441 },
+      { name: '广东省博物馆', bank: '北岸', osmId: 240896442 },
+      { name: '广州西塔', bank: '北岸', osmId: 184738716 },
+      { name: '广州东塔', bank: '北岸', osmId: 511404889 },
+      { name: '猎德大桥', bank: '江上', osmId: 233809684 },
     ]);
+    assert.equal(new Set(stops.map((stop) => stop.name)).size, stops.length, '站名不许重复');
+    assert.equal(new Set(stops.map((stop) => stop.osmId)).size, stops.length, '同一栋楼不许站两次');
     for (const stop of stops) {
       assert.equal(stop.center.length, 2);
       const [lng, lat] = stop.center;
@@ -124,7 +154,13 @@ const behaviors = {
       assert.ok(stop.zoom >= 10 && stop.zoom <= 18.5);
       assert.ok(stop.pitch >= 0 && stop.pitch <= 70);
       assert.ok(Number.isFinite(stop.bearing));
+      // 每一站都得点名一份仓库真发布过的要素，而且落在它自己身上：落点漂到邻站那栋楼上，这里必须当场红。
+      const anchor = shippedAnchors.get(stop.osmId);
+      assert.ok(anchor, `${stop.name} 的 osmId ${stop.osmId} 在仓库数据里点不到名字`);
+      const gap = distanceMeters({ lng: anchor.centre[0], lat: anchor.centre[1] }, { lng, lat });
+      assert.ok(gap <= STOP_ANCHOR_TOLERANCE, `${stop.name} 离它点名的 ${anchor.source} 那一格 ${gap.toFixed(1)} m，超过 ${STOP_ANCHOR_TOLERANCE} m`);
     }
+    // 旧四站的值照旧冻结，连相机角度与措辞一起。
     assert.deepEqual(stops[0].center, [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat]);
     assert.deepEqual(stops[1].center, [113.314334, 23.1110888]);
     assert.deepEqual(stops[2].center, [113.319181, 23.122579]);
@@ -132,6 +168,14 @@ const behaviors = {
     assert.equal(libraries.length, 1, 'the library must resolve to one shipped index entry');
     assert.equal(libraries[0].name, stops[3].name);
     assert.deepEqual(stops[3].center, [libraries[0].lng, libraries[0].lat], 'use the actual library anchor, not its nearby plaza');
+    // 新四站与地标表逐位读同一个落点：这是"同一张表"那一条，手打一个数就会断。
+    const linked = stops.filter((stop) => LANDMARKS.some((landmark) => landmark.osmId === stop.osmId));
+    assert.equal(linked.length, 7, '除图书馆外的七站都该有地标行');
+    for (const stop of linked) {
+      const landmark = LANDMARKS.find((entry) => entry.osmId === stop.osmId);
+      assert.deepEqual(stop.center, landmark.center, `${stop.name} 的落点必须与地标表逐位相同`);
+      assert.ok(landmark.name.includes(stop.name), `${stop.name} 必须就是地标表那一栋的名字（表里写作 ${landmark.name}）`);
+    }
   },
 
   inactive(t, implementation) {
@@ -173,9 +217,10 @@ const behaviors = {
 
   complete(t, implementation) {
     const f = fixture(t, implementation);
+    const count = implementation.TOUR_STOPS.length;
     f.tour.start();
     const expectedStates = [];
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < count; index++) {
       state(f, index, true, true);
       expectedStates.push({ index, playing: true, travelling: true });
       assert.strictEqual(f.cameraInputs[index], implementation.TOUR_STOPS[index]);
@@ -190,7 +235,7 @@ const behaviors = {
     expectedStates.push({ index: -1, playing: false, travelling: false });
     assert.deepEqual(f.states, expectedStates);
     state(f, -1, false, false);
-    assert.equal(f.map.flights.length, 4, 'do not wrap to the tower after the library');
+    assert.equal(f.map.flights.length, count, 'do not wrap to the tower after the last stop');
     assert.equal(f.pending.size, 0);
     assert.equal(f.map.listenerCount('moveend'), 0);
     quiet(f);
@@ -247,12 +292,15 @@ const behaviors = {
   },
 
   navigation(t, implementation) {
+    const count = implementation.TOUR_STOPS.length;
     const f = fixture(t, implementation);
     f.tour.start();
     f.tour.step(-1);
     assert.equal(f.map.flights.length, 1);
     assert.equal(f.states.length, 1);
-    for (const [delta, index] of [[1, 1], [1, 2], [-1, 1], [-1, 0], [2, 2], [1, 3]]) {
+    let index = 0;
+    for (const delta of [1, 1, -1, -1, 2, 1]) {
+      index += delta;
       f.tour.step(delta);
       state(f, index, true, true);
       assert.strictEqual(f.cameraInputs.at(-1), implementation.TOUR_STOPS[index]);
@@ -260,11 +308,18 @@ const behaviors = {
       assert.equal(f.pending.size, 0);
     }
     assert.equal(f.states.length, 7, 'interrupting flights must not publish arrivals');
+    // 一直往前走到最后一站，再往外走一步必须退出，不许回卷到塔。
+    while (index < count - 1) {
+      index += 1;
+      f.tour.step(1);
+      state(f, index, true, true);
+      assert.strictEqual(f.cameraInputs.at(-1), implementation.TOUR_STOPS[index]);
+    }
     cancelledBeforeStop(f);
     assert.equal(f.timeout.mock.callCount(), 0, 'stop-triggered moveend must not arm a timer for the cancelled stop');
     f.tour.step(1);
     state(f, -1, false, false);
-    assert.equal(f.map.flights.length, 7);
+    assert.equal(f.map.flights.length, count + 3);
     assert.equal(f.map.listenerCount('moveend'), 0);
     assert.equal(f.pending.size, 0);
     f.tour.step(-1);
@@ -418,7 +473,7 @@ const behaviors = {
     f.map.arrive();
     state(f, 0, false, false);
     quiet(f);
-    for (let index = 1; index < 4; index++) {
+    for (let index = 1; index < implementation.TOUR_STOPS.length; index++) {
       f.tour.step(1);
       state(f, index, false, true);
       quiet(f);
@@ -428,7 +483,7 @@ const behaviors = {
       assert.equal(f.map.listenerCount('moveend'), 0);
       quiet(f);
     }
-    assert.equal(f.map.flights.length, 5);
+    assert.equal(f.map.flights.length, implementation.TOUR_STOPS.length + 1);
     assert.equal(f.timeout.mock.callCount(), 0, 'manual visits, including the last stop, never schedule autoplay');
     f.tour.step(1);
     state(f, -1, false, false);
@@ -437,10 +492,10 @@ const behaviors = {
 };
 
 const cases = [
-  ['stops', 'four real stops keep their order, local radius and indexed library anchor'],
+  ['stops', 'all eight real stops keep their order, local radius, shipped anchors and indexed library anchor'],
   ['inactive', 'inactive controls are harmless and active starts false'],
   ['arrival', 'a flight does not consume dwell; moveend starts exactly 7000 ms'],
-  ['complete', 'autoplay visits all four stops once and exits after the final full dwell'],
+  ['complete', 'autoplay visits all eight stops once and exits after the final full dwell'],
   ['pauseTravelling', 'pause preserves travelling and resume flies to the same stop'],
   ['pauseArrived', 'pause cancels dwell; repeated resumes grant one full dwell without reflying'],
   ['navigation', 'previous/next obey boundaries and cancel listeners before stopping flights'],
@@ -450,7 +505,7 @@ const cases = [
   ['restart', 'repeated start replaces both in-flight listeners and arrived dwell timers'],
   ['reframeTravelling', 'reframe recomputes the same in-flight stop without a false arrival'],
   ['reframeArrived', 'reframe cancels existing dwell and waits for the new arrival'],
-  ['manual', 'autoplay=false remains manual through arrival, reframe and all four stops'],
+  ['manual', 'autoplay=false remains manual through arrival, reframe and every stop'],
 ];
 
 for (const [key, title] of cases) test(title, (t) => behaviors[key](t, tourModule));
@@ -461,6 +516,9 @@ const mutations = [
   ['stop order', 'stops', '];\n\nexport const TOUR_DWELL_MS', '].reverse();\n\nexport const TOUR_DWELL_MS'],
   ['out-of-radius coordinate', 'stops', '[113.314334, 23.1110888]', '[114.314334, 23.1110888]'],
   ['wrong library anchor', 'stops', '[113.3206608, 23.1189093]', '[113.319181, 23.122579]'],
+  ['stop names an element the repository does not ship', 'stops', 'osmId: 511404889', 'osmId: 1'],
+  ['stop lands off its own element', 'stops', '[113.320579, 23.12026]', '[113.3214187, 23.1174173]'],
+  ['stop centre drifts off the landmark row', 'stops', '[113.320579, 23.12026]', '[113.3205851, 23.1202087]'],
   ['short dwell', 'stops', 'TOUR_DWELL_MS = 7000', 'TOUR_DWELL_MS = 6000'],
   ['inactive reports active', 'inactive', 'get active() { return index >= 0; }', 'get active() { return true; }'],
   ['dwell starts before arrival', 'arrival', "map.flyTo(camera(TOUR_STOPS[index]));", "map.flyTo(camera(TOUR_STOPS[index])); schedule();"],
@@ -533,7 +591,9 @@ function snapshotInScene(source, search) {
   });
 }
 
-// All legacy values, including camera angles and wording, remain contractual.
+// Every stop value, including camera angles and wording, remains contractual.
+// 广州图书馆那一句 2026-10-16 改过一次：它不再是最后一站，原文"结束这程两岸眺望"当场就不成立了。
+// 广州东塔那一句同一天删去"这条 way 没有 building 值"半句：320 px 上它因此多折一行，播放条 192.7 px 破了 180 的上限。
 const cantonStops = [
   { name: '广州塔', bank: '南岸', center: [113.31913, 23.109], zoom: 15.4, pitch: 58, bearing: -25, osmId: 584204634,
     description: '从珠江南岸出发，隔江望向珠江新城。' },
@@ -542,7 +602,15 @@ const cantonStops = [
   { name: '花城广场', bank: '北岸', center: [113.319181, 23.122579], zoom: 15.7, pitch: 40, bearing: 180, osmId: 243319596,
     description: '沿花城广场向南望，绿地串起珠江新城的中轴线。' },
   { name: '广州图书馆', bank: '北岸', center: [113.3206608, 23.1189093], zoom: 17, pitch: 48, bearing: 35, osmId: 240896441,
-    description: '在花城广场东侧的广州图书馆，结束这程两岸眺望。' },
+    description: '在花城广场东侧的广州图书馆；从这里向北，是中轴两侧的两座塔。' },
+  { name: '广东省博物馆', bank: '北岸', center: [113.321145, 23.117494], zoom: 16.8, pitch: 50, bearing: 20, osmId: 240896442,
+    description: '珠江东路 2 号，与图书馆相邻；快照标 5 层，按每层 3.2 m 换算作 16 m 示意厚度。' },
+  { name: '广州西塔', bank: '北岸', center: [113.317861, 23.120317], zoom: 15.6, pitch: 60, bearing: 270, osmId: 184738716,
+    description: '花城广场西侧，与东塔隔广场相望；OSM 标注 440.2 m 与 103 层，自宽脚向圆头收分的曲线是示意。' },
+  { name: '广州东塔', bank: '北岸', center: [113.320579, 23.12026], zoom: 15.6, pitch: 60, bearing: 90, osmId: 511404889,
+    description: '花城广场东侧；OSM 标注 530 m 与 111 层。它只标了 building:part，所以按"未分类"上色。' },
+  { name: '猎德大桥', bank: '江上', center: [113.328447, 23.113333], zoom: 15.2, pitch: 45, bearing: 80, osmId: 233809684,
+    description: '塔脚东北 1.07 km；画面里是 OSM 那两条各 17 m 宽的车行面，净空与厚度是示意，斜拉塔与索 OSM 没有。' },
 ];
 
 function literal(value) {
@@ -571,11 +639,12 @@ function stopContracts(expectedStops) {
 
 const cantonContracts = stopContracts(cantonStops);
 
-test('the tower tour is the only tour: default, explicit and stale scene queries all keep every original stop value', async () => {
+test('the tower tour is the only tour: default, explicit and stale scene queries all keep every stop value', async () => {
   // `?scene=jingtai` 还活在别人收藏的旧链接里，它现在只能落到塔这一侧。
   for (const search of ['', '?scene=canton', '?scene=jingtai']) {
     const implementation = await snapshotInScene(tourSource, search);
-    assert.equal(implementation.TOUR_STOPS.length, 4, search);
+    assert.equal(implementation.TOUR_STOPS.length, cantonStops.length, search);
+    assert.equal(implementation.TOUR_STOPS.length, 8, search);
     assert.equal(implementation.TOUR_DWELL_MS, DWELL, search);
     for (const { check } of cantonContracts) check(implementation);
   }
