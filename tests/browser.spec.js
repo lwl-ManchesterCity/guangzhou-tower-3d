@@ -2859,59 +2859,10 @@ test('night lamps are stepped by height, tinted by OSM id, dimmed by distance, a
   // six families of them: two picks of the cells and the spill, on each of the two grids.
   const BANDS = [0, 1, 2, 3, 4, 5];
   const names = [...FAMILIES, ...NEAR].flatMap(prefix => BANDS.flatMap(band => [0, 1, 2].flatMap(temperature => [0, 1, 2].map(ring => `${prefix}-${band}-${temperature}-${ring}`))));
-  expect(Object.keys(day.tiles).sort(), 'six density rungs of three colour temperatures at three distances, twice over for the two picks of cells, and again for the spill, on both grids')
-    .toEqual(names.slice().sort());
-  for (const band of BANDS) for (const temperature of [0, 1, 2]) for (const ring of [0, 1, 2]) {
-    const lamp = day.tiles[`building-lights-${band}-${temperature}-${ring}`];
-    expect([lamp.size, lamp.bytes], `building-lights-${band}-${temperature}-${ring}: 32 texels of raw RGBA`).toEqual([[32, 32], 4096]);
-    expect(lamp.paneCells, `building-lights-${band}-${temperature}-${ring}: a band is an exact number of windows`).toEqual(CELLS[band]);
-    expect(lamp.opaque, 'not one fully opaque pixel').toBe(0);
-    expect(lamp.covered, 'every lit cell carries the same pane').toBe(lamp.paneCells * 30);
-    expect(lamp.alphas, 'clear ground and lamps, nothing in between').toEqual([0, lamp.peak]);
-    expect(lamp.peak, 'a taller band burns brighter and a farther one dimmer').toBe(Math.round(BRIGHT[band] * DIM[ring]));
-    // The alternate pick is the same band, the same colour, the same recession and the same number of windows - and a
-    // different set of them, which is the whole reason a cross-fade between the two reads as windows changing rather
-    // than as the city dimming.
-    const alt = day.tiles[`building-lights-alt-${band}-${temperature}-${ring}`];
-    expect([alt.size, alt.bytes], `building-lights-alt-${band}-${temperature}-${ring}: the alternate pick is the same tile shape`).toEqual([lamp.size, lamp.bytes]);
-    expect(alt.paneCells, 'and lights exactly as many windows of that band').toBe(lamp.paneCells);
-    expect(alt.peak, 'at the same brightness, so the cross-fade cannot change a block how bright it burns').toBe(lamp.peak);
-    expect(alt.paneLit, 'but not the same windows').not.toBe(lamp.paneLit);
-    const halo = day.tiles[`building-glow-${band}-${temperature}-${ring}`];
-    expect([halo.size, halo.bytes], `building-glow-${band}-${temperature}-${ring}: the same repeat as its lamp`).toEqual([[32, 32], 4096]);
-    expect(halo.opaque, 'spill is never fully opaque').toBe(0);
-    // Three quarters of the window rather than "anything less": the lamp ladder now tops out at 252, so a halo that rose
-    // to 218 against a 224 window still cleared a bare less-than while turning the wall into a second, blurrier board.
-    expect(halo.peak, 'spill stays well under the window it spills from').toBeLessThanOrEqual(lamp.peak * 0.75);
-    expect(halo.alphas.length, 'a halo is a feather, not a square').toBeGreaterThan(8);
-    expect(halo.alphas[0], 'and it leaves clear wall between the halos').toBe(0);
-    expect(halo.cells, 'the halo is centred on the window it belongs to').toBe(lamp.paneCells);
-    expect(halo.covered, 'and reaches well past it').toBeGreaterThan(lamp.covered);
-    // The finer grid, uploaded next to the shipped one and named the way the layer looks it up past the swap zoom. The
-    // promise is that nothing but the pitch changes: twice the rows, twice the columns, four times the windows, so the
-    // share of a band that burns is the same on either grid, at the same brightness, in the same colours.
-    const fine = day.tiles[`building-lights-near-${band}-${temperature}-${ring}`];
-    expect([fine.size, fine.bytes, fine.grid], `building-lights-near-${band}-${temperature}-${ring}: the same 32-texel repeat on twice the grid, so a wall cannot tell the two pitches apart by scale`)
-      .toEqual([lamp.size, lamp.bytes, 8]);
-    expect(lamp.grid, 'and the shipped family is still the coarse one').toBe(4);
-    expect(fine.paneCells, `building-lights-near-${band}-${temperature}-${ring}: four times the windows of the band it replaces`).toBe(lamp.paneCells * 4);
-    expect(Math.round(fine.paneCells / (8 * 8) * 100), 'and the same share of the grid lit').toBe(Math.round(lamp.paneCells / (4 * 4) * 100));
-    expect(fine.peak, 'the swap may not brighten the city').toBe(lamp.peak);
-    expect(fine.covered, 'while each window is a quarter of the pane it replaces').toBe(fine.paneCells * 6);
-    expect(lamp.covered, 'and the shipped pane really was four times the area').toBe(lamp.paneCells * 30);
-    const fineAlt = day.tiles[`building-lights-near-alt-${band}-${temperature}-${ring}`];
-    expect(fineAlt.paneCells, 'the alternate pick crosses the swap with it, or the finer grid is the one that stops breathing').toBe(fine.paneCells);
-    expect(fineAlt.paneLit, 'and it turns windows over on the finer grid too').not.toBe(fine.paneLit);
-    const fineHalo = day.tiles[`building-glow-near-${band}-${temperature}-${ring}`];
-    expect(fineHalo.cells, 'the spill follows the windows onto the finer grid').toBe(fine.paneCells);
-    expect(fineHalo.peak, 'and stays well under the window it spills from').toBeLessThanOrEqual(fine.peak * 0.75);
-  }
-  for (const band of BANDS) for (const temperature of [0, 1, 2]) {
-    const peaks = [0, 1, 2].map(ring => day.tiles[`building-lights-${band}-${temperature}-${ring}`].peak);
-    const halos = [0, 1, 2].map(ring => day.tiles[`building-glow-${band}-${temperature}-${ring}`].peak);
-    expect(peaks[0] > peaks[1] && peaks[1] > peaks[2], `the distance ladder has to reach the lamp pixels (${peaks.join('/')})`).toBe(true);
-    expect(halos[0] > halos[1] && halos[1] > halos[2], `and past the spill with them (${halos.join('/')})`).toBe(true);
-  }
+  // Day: both layers are built, dressed and switched off - and the 324 lamp tiles are not rasterized at all. The
+  // layers that sample them ship invisible, MapLibre only resolves a pattern image when it draws, so a day boot has
+  // no reason to spend 324 offscreen canvases. (Injection: put the registration loop back at boot and this goes red.)
+  expect(Object.keys(day.tiles), 'lazy load: a day boot must not carry a single tile of the lamp family').toEqual([]);
   for (const id of LAMPS) {
     const state = day.states[id];
     const [peak, mid, top] = GLOW_LAYERS.includes(id) ? [0.44, 0.56, 0.66] : [0.62, 0.72, 0.8];
@@ -2956,6 +2907,62 @@ test('night lamps are stepped by height, tinted by OSM id, dimmed by distance, a
   await switchAtmosphere(page, 'night');
   await settled(page);
   const night = await lights();
+  // The lazy family arrives with the first night switch: all 324 names, and every tile-content claim the day read
+  // used to carry is graded here instead - same thresholds, on the tiles the night actually samples. (Injection:
+  // skip the registration in `swapArt` and the names assertion goes red before a single pixel is read.)
+  expect(Object.keys(night.tiles).sort(), 'six density rungs of three colour temperatures at three distances, twice over for the two picks of cells, and again for the spill, on both grids')
+    .toEqual(names.slice().sort());
+  for (const band of BANDS) for (const temperature of [0, 1, 2]) for (const ring of [0, 1, 2]) {
+    const lamp = night.tiles[`building-lights-${band}-${temperature}-${ring}`];
+    expect([lamp.size, lamp.bytes], `building-lights-${band}-${temperature}-${ring}: 32 texels of raw RGBA`).toEqual([[32, 32], 4096]);
+    expect(lamp.paneCells, `building-lights-${band}-${temperature}-${ring}: a band is an exact number of windows`).toEqual(CELLS[band]);
+    expect(lamp.opaque, 'not one fully opaque pixel').toBe(0);
+    expect(lamp.covered, 'every lit cell carries the same pane').toBe(lamp.paneCells * 30);
+    expect(lamp.alphas, 'clear ground and lamps, nothing in between').toEqual([0, lamp.peak]);
+    expect(lamp.peak, 'a taller band burns brighter and a farther one dimmer').toBe(Math.round(BRIGHT[band] * DIM[ring]));
+    // The alternate pick is the same band, the same colour, the same recession and the same number of windows - and a
+    // different set of them, which is the whole reason a cross-fade between the two reads as windows changing rather
+    // than as the city dimming.
+    const alt = night.tiles[`building-lights-alt-${band}-${temperature}-${ring}`];
+    expect([alt.size, alt.bytes], `building-lights-alt-${band}-${temperature}-${ring}: the alternate pick is the same tile shape`).toEqual([lamp.size, lamp.bytes]);
+    expect(alt.paneCells, 'and lights exactly as many windows of that band').toBe(lamp.paneCells);
+    expect(alt.peak, 'at the same brightness, so the cross-fade cannot change a block how bright it burns').toBe(lamp.peak);
+    expect(alt.paneLit, 'but not the same windows').not.toBe(lamp.paneLit);
+    const halo = night.tiles[`building-glow-${band}-${temperature}-${ring}`];
+    expect([halo.size, halo.bytes], `building-glow-${band}-${temperature}-${ring}: the same repeat as its lamp`).toEqual([[32, 32], 4096]);
+    expect(halo.opaque, 'spill is never fully opaque').toBe(0);
+    // Three quarters of the window rather than "anything less": the lamp ladder now tops out at 252, so a halo that rose
+    // to 218 against a 224 window still cleared a bare less-than while turning the wall into a second, blurrier board.
+    expect(halo.peak, 'spill stays well under the window it spills from').toBeLessThanOrEqual(lamp.peak * 0.75);
+    expect(halo.alphas.length, 'a halo is a feather, not a square').toBeGreaterThan(8);
+    expect(halo.alphas[0], 'and it leaves clear wall between the halos').toBe(0);
+    expect(halo.cells, 'the halo is centred on the window it belongs to').toBe(lamp.paneCells);
+    expect(halo.covered, 'and reaches well past it').toBeGreaterThan(lamp.covered);
+    // The finer grid, uploaded next to the shipped one and named the way the layer looks it up past the swap zoom. The
+    // promise is that nothing but the pitch changes: twice the rows, twice the columns, four times the windows, so the
+    // share of a band that burns is the same on either grid, at the same brightness, in the same colours.
+    const fine = night.tiles[`building-lights-near-${band}-${temperature}-${ring}`];
+    expect([fine.size, fine.bytes, fine.grid], `building-lights-near-${band}-${temperature}-${ring}: the same 32-texel repeat on twice the grid, so a wall cannot tell the two pitches apart by scale`)
+      .toEqual([lamp.size, lamp.bytes, 8]);
+    expect(lamp.grid, 'and the shipped family is still the coarse one').toBe(4);
+    expect(fine.paneCells, `building-lights-near-${band}-${temperature}-${ring}: four times the windows of the band it replaces`).toBe(lamp.paneCells * 4);
+    expect(Math.round(fine.paneCells / (8 * 8) * 100), 'and the same share of the grid lit').toBe(Math.round(lamp.paneCells / (4 * 4) * 100));
+    expect(fine.peak, 'the swap may not brighten the city').toBe(lamp.peak);
+    expect(fine.covered, 'while each window is a quarter of the pane it replaces').toBe(fine.paneCells * 6);
+    expect(lamp.covered, 'and the shipped pane really was four times the area').toBe(lamp.paneCells * 30);
+    const fineAlt = night.tiles[`building-lights-near-alt-${band}-${temperature}-${ring}`];
+    expect(fineAlt.paneCells, 'the alternate pick crosses the swap with it, or the finer grid is the one that stops breathing').toBe(fine.paneCells);
+    expect(fineAlt.paneLit, 'and it turns windows over on the finer grid too').not.toBe(fine.paneLit);
+    const fineHalo = night.tiles[`building-glow-near-${band}-${temperature}-${ring}`];
+    expect(fineHalo.cells, 'the spill follows the windows onto the finer grid').toBe(fine.paneCells);
+    expect(fineHalo.peak, 'and stays well under the window it spills from').toBeLessThanOrEqual(fine.peak * 0.75);
+  }
+  for (const band of BANDS) for (const temperature of [0, 1, 2]) {
+    const peaks = [0, 1, 2].map(ring => night.tiles[`building-lights-${band}-${temperature}-${ring}`].peak);
+    const halos = [0, 1, 2].map(ring => night.tiles[`building-glow-${band}-${temperature}-${ring}`].peak);
+    expect(peaks[0] > peaks[1] && peaks[1] > peaks[2], `the distance ladder has to reach the lamp pixels (${peaks.join('/')})`).toBe(true);
+    expect(halos[0] > halos[1] && halos[1] > halos[2], `and past the spill with them (${halos.join('/')})`).toBe(true);
+  }
   for (const id of LAMPS) {
     expect(night.states[id].visibility, `${id}: the night atmosphere has to turn it on`).toBe('visible');
     expect(night.states[id].filter, `${id}: a lamp over a block the lens hides would hang in the air`).toEqual(lampFilterFor(id, night.gridFilter));
@@ -3357,14 +3364,23 @@ test('procedural river surface: a screen-space tile pinned above the basemap wat
     }
     const mid = hits[Math.floor(hits.length / 2)];
     const clear = (x, y) => map.queryRenderedFeatures([[x, y], [x + 300, y + 48]], { layers: ['neighborhood-buildings', 'canton-tower-hit'] }).length === 0;
+    // The middle hit is only the first anchor, not the whole search: the basemap water is remote data, and when its
+    // outline shifts upstream the middle hit can land beside a bank whose extrusions lean over every nearby window
+    // (measured 2026-11-17: mid [124,512] blocked on both the split and the pre-split code, while a clean window sat
+    // at [836,472]). The contract is "a water-only window exists on screen", so the finder walks the rest of the hits
+    // before giving up - the window itself is still graded by the same bounds, clearance and 21-point checks.
+    const anchors = [mid, ...hits.filter((_, i) => i % 5 === 0)];
     let clip = null;
-    if (mid) for (const [dx, dy] of [[0, 0], [60, 0], [-60, 0], [0, 24], [0, -24], [120, 0], [-120, 0]]) {
-      const x = mid[0] + dx, y = mid[1] + dy;
-      if (x < 20 || y < 60 || x + 300 > map.getCanvas().clientWidth - 20 || y + 48 > map.getCanvas().clientHeight - 60) continue;
-      if (!clear(x, y)) continue;
-      if ([0, 24, 48].every(r => [0, 50, 100, 150, 200, 250, 300].every(c => at(x + c, y + r, 'river-surface')))) {
-        clip = { x, y, width: 301, height: 49 };
-        break;
+    outer: for (const anchor of anchors) {
+      if (!anchor) continue;
+      for (const [dx, dy] of [[0, 0], [60, 0], [-60, 0], [0, 24], [0, -24], [120, 0], [-120, 0]]) {
+        const x = anchor[0] + dx, y = anchor[1] + dy;
+        if (x < 20 || y < 60 || x + 300 > map.getCanvas().clientWidth - 20 || y + 48 > map.getCanvas().clientHeight - 60) continue;
+        if (!clear(x, y)) continue;
+        if ([0, 24, 48].every(r => [0, 50, 100, 150, 200, 250, 300].every(c => at(x + c, y + r, 'river-surface')))) {
+          clip = { x, y, width: 301, height: 49 };
+          break outer;
+        }
       }
     }
     return { samples, sheen, onWater, clip };

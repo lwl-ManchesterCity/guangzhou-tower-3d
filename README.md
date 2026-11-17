@@ -92,13 +92,13 @@ npm test
 ## 代码入口
 
 - `src/scenes.js` / `src/config.js`：唯一的地区身份（广州塔）、中心、半径、资源名、相机参数与视角限制；`src/atmosphere.js`：三档氛围的地图与塔身配色、灯光预设。
-- `src/map.js`：底图样式、建筑图层与分级显示、透视镜筛选及高度/平面图层、镜头与导览构图、楼块与平面拾取/高亮、卡片定位与地址栏读写、三张共面覆盖层（立面／灯窗／江面）的注册与门控，以及驱动江面滚动与塔身呼吸的单个 rAF 循环。
+- `src/map.js`：MapLibre 侧的编排——取数、建源建层、透视镜、导览/宣传片接线、命中与深链、手势、teardown 与对外 API；夜灯七层、昼夜氛围、动效循环、地标名牌、卡片挂点与纯函数各自成册在 `src/map/`（lamps / atmosphere / motion / plates / cards / helpers）。
 - `src/tower.js`：参数塔模型与共享 WebGL CustomLayer；`src/facade.js` / `src/water.js`：立面窗格、夜景灯窗与江面纹理的程序化生成（固定种子，只产图，不碰数据与图层）。
 - `src/buildings.js` / `scripts/prepare-buildings.mjs`：OSM 建筑归一化、标签白名单、塔轮廓提取、轮廓内部锚点、检索索引生成与快照转换。
 - `src/search.js` / `src/link.js`：文本归一化与分档排序、`#map=…&b=…` 视角链接的解析与格式化；`src/pois.js` / `src/geo.js`：Overpass 请求与缓存、球面距离与范围多边形。
 - `src/main.js` / `src/style.css` / `index.html`：界面结构、透视镜渲染与事件、氛围切换、导览控制条、检索面板、按需地点面板与安全文本卡片。
 - `src/film.js`：宣传片——六幕镜头、字幕与进度条、暂停／切幕／退出，以及「减少动态效果」下的降级。
-- `tests/*.test.js`：**549 项** Node 测试（31 册），覆盖地图/建筑/POI/氛围/透视镜/导览契约与快照、链接、贴图、近场装配等；每格新断言都配一条自己的源码变异，不以导入错误替代断言失败。
+- `tests/*.test.js`：**556 项** Node 测试（32 册），覆盖地图/建筑/POI/氛围/透视镜/导览契约与快照、链接、贴图、近场装配等；每格新断言都配一条自己的源码变异，不以导入错误替代断言失败。
 - `tests/browser.spec.js` / `tests/engine.browser.spec.js` / `tests/film.browser.spec.js`：**66 项**真实浏览器验收（含宣传片 8 项），`npm run test:browser`（`--workers=1`，整套 29～39 分钟）。逐项读数、历史验收记录与全部截图清单见 [`DEVELOPMENT.md`](DEVELOPMENT.md)。
 
 ## 许可

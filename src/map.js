@@ -1,89 +1,40 @@
 import * as maplibregl from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { DEFAULT_BUILDING_HEIGHT, DEFAULT_CENTER, MAP_STYLE_URL, POI_CATEGORIES, RADIUS_METERS, SCENE, TOWER_OSM_ID, VIEW_LIMITS } from './config.js';
-import { ATMOSPHERES, ATMOSPHERE_MS, HAZE_REVEAL, MOOD, PATTERN_SWAP_MS, SKY_BLEND, baseAtmospherePaint, buildingAtmosphereColor, contextAtmosphereColor, mixPreset, themeBlend, themeResume } from './atmosphere.js';
+import { ATMOSPHERES, HAZE_REVEAL, MOOD, SKY_BLEND, buildingAtmosphereColor, contextAtmosphereColor } from './atmosphere.js';
 import { featureCollection, radiusPolygon } from './geo.js';
-import { insideRing, interiorPoint } from './buildings.js';
 import { formatView, parseView } from './link.js';
 import { isLandscapeViewport, isMobileViewport, viewportPadding } from './padding.js';
 import { mapIcon } from './icons.js';
 import { poisGeoJSON } from './pois.js';
-import { TOWER_MODES, createTowerLayer, towerBreath, towerHue } from './tower.js';
+import { createTowerLayer } from './tower.js';
 import { createTour, TOUR_STOPS } from './tour.js';
 import { createFilm, filmFrame } from './film.js';
 import { heightColor, heightSummary, lensFilter, UNKNOWN_HEIGHT_COLOR } from './lens.js';
 import { schematicDisplayHeights } from './block-layout.js';
-import { FACADE_SHAPES, FACADE_THEMES, GLOW_IMAGE_PREFIX, GLOW_NEAR_IMAGE_PREFIX, LAMP_ALT_IMAGE_PREFIX, LAMP_NEAR_ALT_IMAGE_PREFIX, LAMP_GROUPS, LAMP_KEYS, LAMP_PERIODS_MS, LIGHT_BANDS, LIGHT_FADES, LIGHT_IMAGE_PREFIX, LIGHT_NEAR_IMAGE_PREFIX, LIGHT_NEAR_ZOOM, LIGHT_TEMPERATURES, WINDOWS_OFF_IMAGE, facadeImage, facadeOptions, facadePattern, facadeTexture, glowTexture, lampBreather, lampDarkness, lampTemperatureDeal, lampWeight, lightTexture, lampBandExpression, windowsOffTile } from './facade.js';
-import { WATER_IMAGE_PREFIX, WATER_THEMES, riverOpacityExpression, scrollWater, waterTexture } from './water.js';
-import { BRIDGE_DECK, BRIDGE_PARAPET, BRIDGE_SOURCE, bridgeLayers } from './bridges.js';
-import { MARCH_PHASES, TRAFFIC_BAND, TRAFFIC_FLOW, TRAFFIC_STEP_MS, TRAFFIC_TAIL, marchPair, trafficLayers } from './traffic.js';
+import { FACADE_SHAPES, FACADE_THEMES, LAMP_KEYS, WINDOWS_OFF_IMAGE, facadeImage, facadeOptions, facadePattern, facadeTexture, windowsOffTile } from './facade.js';
+import { WATER_IMAGE_PREFIX, WATER_THEMES, riverOpacityExpression, waterTexture } from './water.js';
+import { BRIDGE_SOURCE, bridgeLayers } from './bridges.js';
+import { trafficLayers } from './traffic.js';
 import { deckHeights, trafficSprite } from './traffic-life.js';
 import { createNearField } from './near-field.js';
 import { createBaseBands } from './shadow-pads.js';
 import { TREE_MIN_ZOOM, VEGETATION_RADIUS, createVegetation } from './vegetation.js';
 import { PLAZA_LAWN, PLAZA_POOL, PLAZA_SOURCE, PLAZA_STONE, PLAZA_WALK, carvePlaza, plazaLayers, stoneRings } from './plaza.js';
 import { plazaSurface, plazaSurfaceMesh } from './plaza-surface.js';
-import { LANDMARKS, approachCamera, declutter, landmarkFacts } from './landmarks.js';
-import { GLYPH_BOX, LANDMARK_GLYPHS } from './landmark-glyphs.js';
 import { FORM_OSM_IDS, createLandmarkForms } from './landmark-forms.js';
+// #219 拆分：纯函数、夜灯七层、昼夜氛围、动效循环、地标名牌、卡片挂点各自成册（src/map/），
+// 这里只剩编排——取数、建源建层、透视镜、导览/宣传片接线、命中与深链、手势、teardown 与对外 API。
+import { buildingId, geometryPoint, neighborhoodStyle } from './map/helpers.js';
+import { createLamps } from './map/lamps.js';
+import { createAtmosphere } from './map/atmosphere.js';
+import { createMotion } from './map/motion.js';
+import { createPlates } from './map/plates.js';
+import { createCards } from './map/cards.js';
 
 maplibregl.setWorkerUrl(workerUrl);
 const center = [DEFAULT_CENTER.lng, DEFAULT_CENTER.lat];
 const distance = ['distance', { type: 'Point', coordinates: center }];
-// Plain OSM way ids stay numbers; a namespaced id (relation/…) is only meaningful as text, and the card seat hit-test
-// compares it with String(), so keeping the string is what lets a relation avoid covering itself.
-const buildingId = (id) => (id === undefined || id === null ? id : /^\d+$/.test(String(id)) ? Number(id) : String(id));
-
-// 只认 Polygon 的取点：数据准备与可步行图留在 Node 那侧，不进客户端这一份。
-// 眼下的建筑快照全是 Polygon，而空洞必须参与—— unnamed、没进索引的 relation 也一样要把点落在肉上。
-function geometryPoint(geometry) {
-  const polygon = geometry.coordinates;
-  const contains = (point) => insideRing(polygon[0], ...point) && !polygon.slice(1).some((ring) => insideRing(ring, ...point));
-  const point = interiorPoint(polygon[0]);
-  if (polygon.length === 1 || contains(point)) return point;
-  const lats = polygon[0].map((p) => p[1]);
-  const min = Math.min(...lats), max = Math.max(...lats);
-  for (let row = 1; row < 32; row++) {
-    const y = min + (max - min) * row / 32;
-    const xs = [];
-    for (const ring of polygon) for (let i = 1; i < ring.length; i++) {
-      const a = ring[i - 1], b = ring[i];
-      if ((a[1] > y) !== (b[1] > y)) xs.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]));
-    }
-    xs.sort((a, b) => a - b);
-    for (let i = 1; i < xs.length; i++) {
-      const candidate = [(xs[i - 1] + xs[i]) / 2, y];
-      if (contains(candidate)) return candidate;
-    }
-  }
-  throw new Error('no interior building point');
-}
-
-// 底图里这三族线图层在三维视角下是"画在面上的东西"：隧道线（路/铁在地下，虚线却压在草坪与江面上）、
-// 行政边界（现实里没有线，跨江那一段在画面里就是一道划痕）、水系中心线（我们自己画了水面，中心线叠上去
-// 像江上裂了几条缝）。用户 2026-10-09 说「别的地方也是，优化一下」，量到的正是这三族：机位 15.5 级扫一遍，
-// 压在开阔水面上的采样点里 `tunnel_transit_rail_hatching` 198 次、`waterway_river` 178 次、`boundary_3` 134 次。
-// 水系的名字留着（`waterway_line_label` 那一层是"珠江"三个字，不是线）。
-const SUBSURFACE_LINES = /^(tunnel_|boundary_(2|3|disputed)$|waterway_(river|other|tunnel)$)/;
-
-function neighborhoodStyle(style) {
-  style.projection = { type: 'mercator' };
-  style.layers = style.layers.filter((layer) => layer.type !== 'fill-extrusion' && !['poi', 'housenumber'].includes(layer['source-layer']) && !layer.id.includes('shield')
-    && !(layer.type === 'line' && SUBSURFACE_LINES.test(layer.id)));
-  for (const layer of style.layers) {
-    const source = layer['source-layer'];
-    if (layer.type === 'fill' && source === 'building') {
-      delete layer.maxzoom;
-      layer.paint = {};
-    }
-    layer.paint = { ...layer.paint, ...baseAtmospherePaint(layer, ATMOSPHERES.day) };
-    if (layer.type === 'symbol' && layer.layout?.['text-field']) {
-      layer.layout['text-field'] = ['coalesce', ['get', 'name:zh'], ['get', 'name:en'], ['get', 'name']];
-      if (['transportation_name', 'place'].includes(source)) layer.minzoom = Math.max(layer.minzoom ?? 0, source === 'place' ? 16 : 16.5);
-    }
-  }
-  return style;
-}
 
 export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInteraction, onTourChange, onFilmChange, onLensChange, onMotionChange, onError }) {
   const [response, buildingsResponse, bridgeResponse, crossingsResponse, riverResponse, streetsResponse, greensResponse, blocksResponse, waterResponse] = await Promise.all([
@@ -144,13 +95,10 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     const timeout = setTimeout(() => { map.remove(); reject(new Error('地图加载超时，请检查网络后重新加载。')); }, 40000);
     map.once('load', () => { clearTimeout(timeout); resolve(); });
   });
-  let frame, previousTime, popup, selectedPoiId, cardBlock;
+  let frame, previousTime, selectedPoiId;
   let orbiting = false, poiFeatures = [], activeFilter = 'all';
   let film, filmSaved, filmShot = -1;
-  let lens = { mode: 'use', category: 'all', source: 'all' }, atmosphereId = 'day';
-  // The clock of an atmosphere walk in progress: which theme the picture on screen came from, which one it was heading
-  // for, how far it had got, and whether the patterns had been swapped yet.
-  let moodRun;
+  let lens = { mode: 'use', category: 'all', source: 'all' };
   let selection; // the block an open card describes, so the address bar can point back at it
   let focus; // a block waiting for the camera and its tiles to settle before it can be picked
   let lastHash = window.location.hash;
@@ -193,35 +141,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // `!` rather than spelling it `!in`: the expression form is what the validator knows, and a filter it does not
   // recognise drops the whole layer as an `error` event - no throw, nothing in the console.
   const formFilter = ['!', ['in', ['get', 'osmId'], ['literal', FORM_OSM_IDS]]];
-  // The night lamps are four layers rather than one: two groups of blocks, split by their own OSM id, each cross-fading
-  // between two picks of the same band's cells. The shipped pick keeps the layer this scene has always had - same id,
-  // same tile family - so everything that reads `building-lights` still reads it. See LAMP_GROUPS in facade.js for why
-  // a cross-fade on opacity is the only motion this layer can make at all.
-  const lampLayers = [
-    { id: 'building-lights', group: 0, pick: 0 },
-    { id: 'building-lights-alt', group: 0, pick: 1 },
-    { id: 'building-lights-2', group: 1, pick: 0 },
-    { id: 'building-lights-2-alt', group: 1, pick: 1 },
-  ];
-  const lampGroup = (group) => ['==', ['%', ['to-number', ['get', 'osmId'], 0], LAMP_GROUPS], group];
-  const lampBreath = lampBreather();
-  // `setFilter` replaces rather than merges, so every time the lens hands a base filter back the group clause has to
-  // ride along with it - otherwise half the city's lamps end up drawn over the other half's group. The spill has no
-  // group of its own except on the two layers that carry the breathing minority, whose halo has to go out with the
-  // windows it spills from.
-  const lampFilter = (layer, base) => {
-    const gates = [base];
-    if (layer.group !== null) gates.push(lampGroup(layer.group));
-    if (layer.breath === true) gates.push(lampBreath);
-    else if (layer.breath === false) gates.push(['!', lampBreath]);
-    return ['all', ...gates];
-  };
-  const glowLayers = [
-    { id: 'building-glow', group: null, breath: false },
-    { id: 'building-glow-breath-0', group: 0, breath: true },
-    { id: 'building-glow-breath-1', group: 1, breath: true },
-  ];
-  const lampGates = [...lampLayers, ...glowLayers];
   map.addLayer({ id: 'neighborhood-buildings-overview', type: 'fill-extrusion', source: 'canton-buildings', maxzoom: 14, filter: ['all', overviewFilter, formFilter], paint });
   map.addLayer({ id: 'neighborhood-buildings', type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14, filter: formFilter, paint });
   map.addLayer({ id: 'height-estimates', type: 'fill-extrusion', source: 'canton-buildings', layout: { visibility: 'none' }, filter: lensFilter('all', 'levels'), paint: { ...paint, 'fill-extrusion-color': heightColor(), 'fill-extrusion-opacity': 0.55 } });
@@ -280,8 +199,8 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // One transparent tile for the blocks the id dice left dark, shared by both window layers and by the night grid as
   // well: a building that burns nothing cannot keep the grid's own 16 % of lit panes either.
   map.addImage(WINDOWS_OFF_IMAGE, windowsOffTile());
-  for (const atmosphere of Object.keys(FACADE_THEMES)) for (const shape of Object.keys(FACADE_SHAPES)) {
-    map.addImage(facadeImage(atmosphere, shape), facadeTexture(facadeOptions(atmosphere, shape)));
+  for (const theme of Object.keys(FACADE_THEMES)) for (const shape of Object.keys(FACADE_SHAPES)) {
+    map.addImage(facadeImage(theme, shape), facadeTexture(facadeOptions(theme, shape)));
   }
   map.addLayer({
     id: 'building-facade', type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14, filter: formFilter,
@@ -292,109 +211,15 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
       'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': true,
     },
   }, 'height-estimates');
-  // Night lamps are coplanar overlays rather than a brighter colour in the grid above: an overlay can be almost opaque
-  // where a window is and still leave the rest of the wall transparent, so the category colour and the distance fade of
-  // the layer underneath keep coming through. How many windows a block lights is read from its own displayed height,
-  // what colour they burn from its own OSM id and how brightly from its own distance, so no lamp is hand-placed and a
-  // reload cannot reshuffle the skyline.
-  // `fill-extrusion-vertical-gradient` stays off so a ground-floor window is not darker than a top-floor one, and the
-  // pattern necessarily paints the top face too, so a low block shows lamps on its roof as well - accepted rather than
-  // hidden, since masking the roof would mean drawing a second geometry. Turned on by the night atmosphere only, and it
-  // shadows `building-facade`'s filter so a lamp never hangs in the air over a block the current lens hides.
-  const wallHeight = ['coalesce', ['get', 'displayHeight'], ['get', 'height']];
-  // The band is stepped on the same expression the extrusion height uses, so a block can never be drawn at one height
-  // and dressed for another. Band x temperature x ring names one tile, i.e. twenty-seven per family.
-  const lampBand = lampBandExpression(wallHeight);
-  // Distance is a tile axis rather than an opacity one because `fill-extrusion-opacity` is not data-driven: the moment
-  // MapLibre's style validator sees `['get', ...]` in it, the whole layer is dropped - as an `error` event, not a
-  // throw, so the map simply renders without lamps. Without the ring a block 2.9 km away burns as brightly as one 300 m
-  // off, and 1,441 of the 1,816 blocks on screen at the hero camera are past 1.5 km, which is most of what made the
-  // first night frame read as an even sprinkle instead of a skyline with depth.
-  const lampRing = ['step', ['get', 'distance'], 0, ...LIGHT_FADES.slice(0, -1).flatMap((ring, index) => [ring.below, index + 1])];
-  // The colour temperature is dealt out by the block's own id too, but no longer three ways: `osmId % 3` gave a third
-  // of the city the blue-white of an office slab, which is the "全白" the brief is about. Ten buckets, four amber, four
-  // warm white, two cool - 80% warm, 20% cool - and the dark slice below is dealt from a *different* modulus, so
-  // switching buildings off cannot thin the colour distribution with it.
-  const lampTemperature = lampTemperatureDeal();
-  const lampDark = lampDarkness();
-  const lampTile = (prefix) => ['concat', prefix, '-', lampBand, '-', lampTemperature, '-', lampRing];    // The pane pitch is a tile axis as well: the shipped grid is 7.3 m per cell because that is the finest pitch the
-  // hero camera (zoom 15.5 / pitch 62, ~1.6 m per screen pixel on a wall face) still resolves as a window, and V7
-  // asks for half of it. Halving it everywhere put the hero camera's windows below that floor - measured 154 lit
-  // pixels against 641 on the same wall - so the 3.7 m grid is a second family that takes over where it resolves.
-  // `['zoom']` stays the outermost input of the top-level step: nested, the whole property is silently refused.
-  // `dark` is the set of blocks that gets no tile at all: the 1/11 that burns nothing, plus - on the alternate pick
-  // only - the 1/17 that breathes a whole facade instead of a cell or two.
-  const lampImage = (prefix, nearPrefix, dark = lampDark) => ['step', ['zoom'],
-    ['case', dark, WINDOWS_OFF_IMAGE, lampTile(prefix)], LIGHT_NEAR_ZOOM,
-    ['case', dark, WINDOWS_OFF_IMAGE, lampTile(nearPrefix)]];
-  // 本组那一枚出厂档的表达式写法（注意它与 `src/facade.js` 那个算数值的 `lampWeight` 同名不同物，这里叫
-  // `lampState`）。`['zoom']` has to stay
-  // the input of the outermost interpolate - nested inside a `['*']` the whole property is silently refused - so the
-  // global state rides inside each stop, which is also how the day/sunset/night blend walks these same numbers.
-  const lampState = (group) => ['global-state', LAMP_KEYS[group]];
-  const lampAlpha = (layer) => layer.pick === 0
-    ? lampState(layer.group) : ['-', 1, lampState(layer.group)];
-  const lampOpacity = (layer) => ['interpolate', ['linear'], ['zoom'],
-    14, 0, 15, ['*', 0.62, lampAlpha(layer)], 16.5, ['*', 0.72, lampAlpha(layer)], 18, ['*', 0.8, lampAlpha(layer)]];
-  // The spill's own ramp. `weight` is null for the majority, whose halo is spill and not a window and so never moves;
-  // the breathing minority gets its group's weight, so the wash on its wall goes out with the windows that made it
-  // instead of floating on a dark building. At weight 1 the multiplier is exactly 1 - the shipped frame is unchanged.
-  const glowOpacity = (weight) => ['interpolate', ['linear'], ['zoom'], 14, 0,
-    15, weight ? ['*', 0.44, weight] : 0.44,
-    16.5, weight ? ['*', 0.56, weight] : 0.56,
-    18, weight ? ['*', 0.66, weight] : 0.66];
-  for (let band = 0; band < LIGHT_BANDS.length; band++) {
-    for (let temperature = 0; temperature < LIGHT_TEMPERATURES.length; temperature++) {
-      for (let ring = 0; ring < LIGHT_FADES.length; ring++) {
-        map.addImage(`${LIGHT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring));
-        map.addImage(`${LAMP_ALT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 1));
-        map.addImage(`${GLOW_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, glowTexture(band, temperature, ring));
-        map.addImage(`${LIGHT_NEAR_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 0, true));
-        map.addImage(`${LAMP_NEAR_ALT_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, lightTexture(band, temperature, ring, 1, true));
-        map.addImage(`${GLOW_NEAR_IMAGE_PREFIX}-${band}-${temperature}-${ring}`, glowTexture(band, temperature, ring, true));
-      }
-    }
-  }
-  for (const layer of lampLayers) {
-    map.addLayer({
-      id: layer.id, type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14, filter: lampFilter(layer, formFilter),
-      layout: { visibility: 'none' },
-      paint: {
-        // On the alternate hand, the breathing minority is handed the all-dark tile: as its group's weight walks from
-        // 1 to 0 the whole facade goes out with it, while every other block just turns a cell or two over. Opacity
-        // cannot carry that per-block rule - `['get']` in `fill-extrusion-opacity` drops the layer - so the dice is
-        // read here, where a data-driven pattern is what the layer already runs on.
-        'fill-extrusion-pattern': lampImage(layer.pick ? LAMP_ALT_IMAGE_PREFIX : LIGHT_IMAGE_PREFIX,
-          layer.pick ? LAMP_NEAR_ALT_IMAGE_PREFIX : LIGHT_NEAR_IMAGE_PREFIX,
-          layer.pick ? ['any', lampDark, lampBreath] : lampDark),
-        'fill-extrusion-opacity': lampOpacity(layer),
-        'fill-extrusion-height': wallHeight,
-        'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': false,
-      },
-    }, 'height-estimates');
-  }
-  // Spill goes under the lamps it belongs to: the hard-edged tile draws over its own halo, so a window keeps an edge
-  // while the wall around it picks up the light. Same geometry, same band, same gates - and it has to be inserted by
-  // id, since the lamps already exist at this point. It stays on the shipped pick: a halo is spill, not a window, and
-  // the two picks' halos differ only in which cells they smear. The breathing minority is the exception, and it is
-  // its own two layers rather than a per-block opacity (which `fill-extrusion-opacity` cannot carry): a building
-  // whose windows are going out cannot keep the wash they cast.
-  let under = lampLayers[0].id;
-  for (const layer of glowLayers) {
-    map.addLayer({
-      id: layer.id, type: 'fill-extrusion', source: 'canton-buildings', minzoom: 14,
-      filter: lampFilter(layer, formFilter),
-      layout: { visibility: 'none' },
-      paint: {
-        'fill-extrusion-pattern': lampImage(GLOW_IMAGE_PREFIX, GLOW_NEAR_IMAGE_PREFIX),
-        'fill-extrusion-opacity': glowOpacity(layer.group === null ? null : lampState(layer.group)),
-        'fill-extrusion-height': wallHeight,
-        'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-vertical-gradient': false,
-      },
-    }, under);
-    under = layer.id;
-  }
-  applyLight();
+  const lamps = createLamps(map, formFilter);
+  // 动效时钟是氛围与循环共用的那一份：换图要归零江面相位、熄灯要归零步进，所以它谁也不私有。
+  const motion = { on: false, frame: undefined, previous: undefined, river: 0, breath: 0, traffic: 0, hue: 0, life: 0, lamp: 0, phase: 0, march: 0, steps: 0, pulses: 0, marches: 0, lights: 0, lampTicks: 0, pulse: 1 };
+  // 塔层、广场与雾的读数在这两份工厂构造之后才建出来／才会变，所以一律走取值函数；`motionApi` 先声明，
+  // 氛围那份拿着它的雾读数闭包，构造完马上补上——两边真正调用都在构造之后。
+  let motionApi;
+  const atmosphere = createAtmosphere({ map, style, center, getLens: () => lens, tower: () => towerLayer, plaza: () => plaza, riverTiles, motion, reducedMotion, lamps, hazeStatus: () => motionApi.hazeStatus() });
+  motionApi = createMotion({ map, riverTiles, tower: () => towerLayer, motion, atmosphere, getLens: () => lens, reducedMotion, onMotionChange });
+  atmosphere.applyLight();
   map.setSky({ ...ATMOSPHERES.day.sky, ...SKY_BLEND });
   // `setGlobalState` reads the stylesheet form (`{ key: { default } }`); the single-key setter is the one that takes a
   // value, and it early-returns when nothing changed, so a rAF loop can call it every frame for free.
@@ -465,7 +290,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   function applyLens() {
     // Changing the lens mid-walk would paint over one of the blends the walk owns; the honest answer is to finish the
     // transition first, so the lens is applied to a scene that has already reached the theme it was heading for.
-    if (moodRun) settleAtmosphere();
+    if (atmosphere.running) atmosphere.settle();
     const heights = lens.mode === 'height';
     const filter = lensFilter(lens.category, heights ? lens.source : 'all');
     const tagged = ['all', filter, ['==', ['get', 'heightSource'], 'height']];
@@ -478,14 +303,17 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     map.setFilter('building-facade', heights ? tagged : shown);
     map.setLayoutProperty('building-facade', 'visibility', heights ? 'none' : 'visible');
     // The lamps and their spill follow the same filter, and they only burn at night.
-    for (const layer of lampGates) {
-      map.setFilter(layer.id, lampFilter(layer, heights ? tagged : shown));
-      map.setLayoutProperty(layer.id, 'visibility', heights || atmosphereId !== 'night' ? 'none' : 'visible');
+    for (const layer of lamps.lampGates) {
+      map.setFilter(layer.id, lamps.lampFilter(layer, heights ? tagged : shown));
+      const visible = !heights && atmosphere.id === 'night';
+      // 走路去夜里的途中 `atmosphereId` 已是 night 而中点还没到，这里先开门就必须先有图。
+      if (visible) lamps.ensureLampImages();
+      map.setLayoutProperty(layer.id, 'visibility', visible ? 'visible' : 'none');
     }
     // The traffic follows the same rule as the lamps, and has to be re-decided here too: an atmosphere switch
     // re-runs this through `swapArt`, but moving to the height lens does not, and a lens change is the one case
     // where the theme stays put while the view it is drawn in changes.
-    lightTraffic(!heights && atmosphereId === 'night');
+    atmosphere.lightTraffic(!heights && atmosphere.id === 'night');
     towerLayer?.setTraffic(!heights);
     towerLayer?.setVegetation(!heights);
     towerLayer?.setGround(!heights);
@@ -496,7 +324,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
       map.setFilter(layer, ['all', filter, ['==', ['get', 'heightSource'], source]]);
       map.setLayoutProperty(layer, 'visibility', heights ? 'visible' : 'none');
     }
-    for (const layer of ['neighborhood-buildings', 'neighborhood-buildings-overview']) map.setPaintProperty(layer, 'fill-extrusion-color', heights ? heightColor() : buildingAtmosphereColor(ATMOSPHERES[atmosphereId]));
+    for (const layer of ['neighborhood-buildings', 'neighborhood-buildings-overview']) map.setPaintProperty(layer, 'fill-extrusion-color', heights ? heightColor() : buildingAtmosphereColor(ATMOSPHERES[atmosphere.id]));
     map.setLayoutProperty('context-buildings', 'visibility', heights || lens.category !== 'all' ? 'none' : 'visible');
     onLensChange(lens, heightSummary(buildings.features, lens.category));
     if (hoverPoint) hoverFrame ??= requestAnimationFrame(hoverCursor);
@@ -507,334 +335,15 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     applyLens();
   }
   function setLens(next) {
-    manualInteraction(); cancelFocus(); popup?.remove();
+    manualInteraction(); cancelFocus(); cards.close();
     lens = { ...next };
     applyLens();
   }
-  // Every colour the atmosphere owns, as `layer/property` -> declaration, for one theme id. Patterns and visibility are
-  // deliberately missing: nothing can interpolate a `resolvedImage`, so they belong to the swap below.
-  function atmospherePaint(id) {
-    const theme = ATMOSPHERES[id];
-    const paint = new Map();
-    const put = (layer, property, value) => { if (value !== undefined) paint.set(`${layer}/${property}`, value); };
-    for (const layer of style.layers) {
-      const merged = { ...layer.paint, ...baseAtmospherePaint(layer, theme) };
-      for (const property of ['background-color', 'fill-color', 'line-color', 'text-color', 'text-halo-color'])
-        put(layer.id, property, merged[property]);
-    }
-    const heights = lens.mode === 'height';
-    for (const layer of ['neighborhood-buildings', 'neighborhood-buildings-overview'])
-      put(layer, 'fill-extrusion-color', heights ? heightColor() : buildingAtmosphereColor(theme));
-    put('context-buildings', 'fill-extrusion-color', contextAtmosphereColor(theme, center));
-    // The decks carry a `match` on their own `foot` tag, so the pedestrian crossing stays the warmer one through the
-    // whole walk, and the walk still gets to move both ends of it.
-    for (const layer of bridgeLayers(theme)) put(layer.id, 'fill-extrusion-color', layer.paint['fill-extrusion-color']);
-    put('building-selection', 'fill-extrusion-color', theme.selection);
-    put('building-selection-flat', 'fill-color', theme.selection);
-    put('radius-line', 'line-color', theme.radius);
-    put('tower-label', 'text-color', theme.towerText);
-    put('tower-label', 'text-halo-color', theme.towerHalo);
-    put('poi-markers', 'text-color', theme.poiText);
-    put('poi-markers', 'text-halo-color', theme.poiHalo);
-    return paint;
-  }
-  // What no expression can walk: the facade grid, the river tile, which texture the basemap's patterned fills use, and
-  // whether the lamps are burning. One step, at the middle of the colour transition.
-  let trafficVisible = false;
-  // The streets burn with the windows, and the height lens is a data view rather than a night view, so it keeps the
-  // traffic out the same way it keeps the lamp grid out. `trafficVisible` is what the march reads, so the loop can
-  // never spend a step on a layer nobody can see.
-  // The two marching layers are always written together: they are one traffic light seen two ways, and a frame where
-  // only one of them moved is a frame where the lattice is regular again.
-  function marchLights(step) {
-    const [headlights, taillights] = marchPair(step);
-    map.setPaintProperty(TRAFFIC_FLOW, 'line-dasharray', headlights);
-    map.setPaintProperty(TRAFFIC_TAIL, 'line-dasharray', taillights);
-  }
-  function lightTraffic(lit) {
-    trafficVisible = lit;
-    for (const layer of [TRAFFIC_BAND, TRAFFIC_TAIL, TRAFFIC_FLOW]) map.setLayoutProperty(layer, 'visibility', lit ? 'visible' : 'none');
-    // The lamps burn with the ribbons; the cars and the walkers themselves stay on the picture by day too, and the
-    // only thing that takes them off is the height lens, which is decided where the lens is applied.
-    towerLayer?.setTrafficLamps(lit);
-    if (lit) return;
-    marchLights(0);
-    motion.march = 0;
-    // The near field is deliberately not snapped here. The ribbons are night-only, so resetting them on the way out is
-    // invisible; the cars and the walkers burn by day as well, and a reset on the way out was a jump the observer
-    // could see. They go back to the spacing their own ways give them in one place only: when the loop is switched off.
-  }
-  function swapArt(id) {
-    const theme = ATMOSPHERES[id];
-    for (const layer of style.layers) {
-      const pattern = { ...layer.paint, ...baseAtmospherePaint(layer, theme) }['fill-pattern'];
-      if (pattern !== undefined) map.setPaintProperty(layer.id, 'fill-pattern', pattern);
-    }
-    map.setPaintProperty('building-facade', 'fill-extrusion-pattern', facadePattern(id));
-    // 广场那四层跟着氛围走色：草坪与水面用它们自己的档，石材用 `plaza`/`plazaWalk`。
-    if (plaza) for (const layer of plazaLayers(theme)) map.setPaintProperty(layer.id, 'fill-color', layer.paint['fill-color']);
-    // Lamps only burn at night, and the height lens keeps its colour-as-data wall to itself.
-    for (const layer of lampGates) {
-      map.setLayoutProperty(layer.id, 'visibility', id === 'night' && lens.mode !== 'height' ? 'visible' : 'none');
-    }
-    // The streets light up with the windows and go dark with them, and the height lens keeps them out.
-    lightTraffic(id === 'night' && lens.mode !== 'height');
-    // The beam over the mast belongs to the night only. It is the one thing on this map with no OSM element behind it,
-    // which is why the landmark card for the tower says out loud that it is 示意.
-    towerLayer?.setBeam(id === 'night');
-    towerLayer?.setForms({ from: ATMOSPHERES[id], reveal: hazeStatus().reveal });
-    map.setPaintProperty('river-surface', 'fill-pattern', `${WATER_IMAGE_PREFIX}-${id}`);
-    // The loop writes into whichever tile the atmosphere currently points at, so all three are put back on their
-    // shipped rows and the scroll restarts from row zero on the new one.
-    if (Object.keys(riverTiles).length) {
-      for (const [tileId, tile] of Object.entries(riverTiles)) map.updateImage(`${WATER_IMAGE_PREFIX}-${tileId}`, scrollWater(tile, 0));
-      motion.phase = 0;
-      motion.river = 0;
-    }
-  }
-  function atmosphereLight(id) {
-    return ATMOSPHERES[id].light;
-  }
-  function applyLight(override) {
-    const light = override ?? atmosphereLight(atmosphereId);
-    map.setLight({ ...light, 'color-transition': { duration: 0 }, 'intensity-transition': { duration: 0 }, 'position-transition': { duration: 0 } });
-  }
-  function applySky(colors) {
-    map.setSky({ ...colors ?? ATMOSPHERES[atmosphereId].sky, ...SKY_BLEND,
-      'sky-color-transition': { duration: 0 }, 'horizon-color-transition': { duration: 0 }, 'fog-color-transition': { duration: 0 } });
-  }
-  function installPaint(paint) {
-    for (const [key, value] of paint) {
-      const [layer, property] = key.split('/');
-      map.setPaintProperty(layer, `${property}-transition`, { duration: 0 });
-      map.setPaintProperty(layer, property, value);
-    }
-  }
-  // Stop the clock without touching what it was painting. Returns where the walk stood, for a walk that resumes from it.
-  function stopMood() {
-    if (!moodRun) return null;
-    // The state is what the picture is painted from, so it is what the next walk resumes from - not the number the
-    // clock last computed, which is rounded on the way in.
-    const stood = { fromId: moodRun.fromId, toId: moodRun.toId, at: map.getGlobalState()[MOOD] ?? 0 };
-    cancelAnimationFrame(moodRun.frame);
-    moodRun = undefined;
-    return stood;
-  }
-  // The end of a walk, and the whole of a switch that must not animate: every surface on the theme it was heading for,
-  // written as the shipped declaration rather than as a blend, so the frame a finished transition leaves behind is
-  // byte-for-byte the frame a page without this feature would have drawn.
-  function settleAtmosphere() {
-    stopMood();
-    const theme = ATMOSPHERES[atmosphereId];
-    installPaint(atmospherePaint(atmosphereId));
-    swapArt(atmosphereId);
-    // The shells have no expression to hold a middle stop in, so their arrival is written here rather than inside
-    // `swapArt`: that also runs at the pattern swap mid-walk, and a share of 1 there would light a landmark in one
-    // frame instead of on the curve its neighbours are walking.
-    towerLayer?.setForms({ share: 1 });
-    map.setGlobalStateProperty(MOOD, 0);
-    applyLight();
-    applySky();
-    towerLayer?.setAtmosphere(theme.tower);
-  }
-  function setAtmosphere(id, { instant = false, duration = ATMOSPHERE_MS } = {}) {
-    const previous = stopMood();
-    const fromId = atmosphereId;
-    if (id === fromId && !previous) return;
-    atmosphereId = id;
-    // A reduce request gets the shipped cut: the same end frame, no 1.2 s of frames to spend.
-    if (instant || reducedMotion.matches) return settleAtmosphere();
-    const from = atmospherePaint(previous ? previous.fromId : fromId);
-    const abandoned = previous ? atmospherePaint(previous.toId) : from;
-    const target = atmospherePaint(id);
-    const at = previous ? previous.at : 0;
-    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-    for (const [key, value] of target) {
-      const a = from.get(key), b = abandoned.get(key);
-      // Untouched by this switch - and, unless a walk is being abandoned, nothing to undo either.
-      if (same(a, value) && (at === 0 || same(b, value))) continue;
-      const [layer, property] = key.split('/');
-      map.setPaintProperty(layer, `${property}-transition`, { duration: 0 });
-      map.setPaintProperty(layer, property, at ? themeResume(a, b, value, at) : themeBlend(a, value));
-    }
-    const lightFrom = previous ? mixPreset(atmosphereLight(previous.fromId), atmosphereLight(previous.toId), at) : atmosphereLight(fromId);
-    const skyFrom = previous ? mixPreset(ATMOSPHERES[previous.fromId].sky, ATMOSPHERES[previous.toId].sky, at) : ATMOSPHERES[fromId].sky;
-    const towerFrom = previous ? mixPreset(ATMOSPHERES[previous.fromId].tower, ATMOSPHERES[previous.toId].tower, at) : ATMOSPHERES[fromId].tower;
-    const themeFrom = ATMOSPHERES[previous ? previous.fromId : fromId];
-    const start = performance.now();
-    const step = (now) => {
-      const t = Math.min(1, (now - start) / duration);
-      // The same cubic in-out MapLibre applies to its own colour transitions, so the light, the sky and the tower -
-      // which are not paint at all and so cannot read the global state - walk on the same curve as the walls.
-      const eased = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-      moodRun.value = at + (1 - at) * eased;
-      map.setGlobalStateProperty(MOOD, Math.round(moodRun.value * 1000) / 1000);
-      const share = (moodRun.value - at) / (1 - at);
-      applyLight(mixPreset(lightFrom, atmosphereLight(id), share));
-      applySky(mixPreset(skyFrom, ATMOSPHERES[id].sky, share));
-      towerLayer?.setAtmosphere(mixPreset(towerFrom, ATMOSPHERES[id].tower, share));
-      // The shells walk with the walls, and their night lamps come up on the same eased share rather than in one frame.
-      towerLayer?.setForms({ from: themeFrom, to: ATMOSPHERES[id], share, resume: Boolean(previous),
-        reveal: hazeStatus().reveal });
-      if (!moodRun.swapped && now - start >= PATTERN_SWAP_MS) { moodRun.swapped = true; swapArt(id); }
-      if (t < 1) moodRun.frame = requestAnimationFrame(step);
-      else settleAtmosphere();
-    };
-    moodRun = { fromId: previous ? previous.fromId : fromId, toId: id, value: at, swapped: false, frame: undefined, duration };
-    moodRun.frame = requestAnimationFrame(step);
-  }
-  function moodStatus() {
-    return {
-      mood: map.getGlobalState()[MOOD] ?? 0,
-      running: moodRun !== undefined,
-      swapped: Boolean(moodRun?.swapped),
-      ms: moodRun?.duration ?? ATMOSPHERE_MS,
-      swapMs: PATTERN_SWAP_MS,
-    };
-  }
-
-  // Six landmarks, each one an OSM element the shipped snapshots already carry. A marker is a button, so the keyboard
-  // reaches it and the card it opens is themed like every other card on this map. The tower's plain text label steps
-  // out here: the interactive marker carries the same name, and two labels for one building is a mistake twice over.
-  // Each nameplate is drawn with its own silhouette - see `landmark-glyphs.js` for where those shapes come from.
-  const SVG_NS = 'http://www.w3.org/2000/svg';
-  function landmarkGlyph(osmId) {
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('class', 'landmark-gem');
-    svg.setAttribute('viewBox', GLYPH_BOX);
-    svg.setAttribute('aria-hidden', 'true');
-    for (const d of LANDMARK_GLYPHS[osmId] ?? ['M4,21 L12,3 L20,21 Z']) {
-      const path = document.createElementNS(SVG_NS, 'path');
-      path.setAttribute('d', d);
-      svg.append(path);
-    }
-    return svg;
-  }
-  const landmarkElements = new Map();
-  map.setLayoutProperty('tower-label', 'visibility', 'none');
-  for (const landmark of LANDMARKS) {
-    const node = document.createElement('button');
-    node.type = 'button';
-    node.className = 'landmark';
-    node.dataset.osmId = String(landmark.osmId);
-    node.setAttribute('aria-label', landmark.name);
-    const gem = landmarkGlyph(landmark.osmId);
-    const name = document.createElement('span');
-    name.className = 'landmark-name';
-    name.textContent = landmark.name;
-    node.append(gem, name);
-    // The click has to stop here: a nameplate is inside the canvas container, and without this the same press also
-    // reaches the map's own click handler, which closes the card that was just opened.
-    node.addEventListener('click', (event) => { event.stopPropagation(); openLandmark(landmark); });
-    landmarkElements.set(landmark.osmId, node);
-    // `interactive` is not optional: a MapLibre marker sets `pointer-events: none` on its element without it, and the
-    // button then swallows nothing and answers nothing.
-    new maplibregl.Marker({ element: node, anchor: 'bottom', offset: [0, -6], interactive: true })
-      .setLngLat(landmark.center).addTo(map);
-  }
-  // Two plates that touch read as one garbled line, and the six landmarks sit close enough together for that well
-  // before the camera reaches the tower. The sizes are measured once per layout rather than per pass: reading
-  // `offsetWidth` after every class write would force the page to lay out the whole marker container on each frame of
-  // a drag. The silhouette size is taken from the same element with its name off, in the same frame, so nothing is
-  // painted between the two states.
-  let plateSizes;
-  let plateFrame;
-  function measurePlates() {
-    const nodes = [...landmarkElements.values()];
-    for (const node of nodes) node.classList.remove('is-textless', 'is-hidden');
-    const full = nodes.map((node) => ({ w: node.offsetWidth, h: node.offsetHeight }));
-    for (const node of nodes) node.classList.add('is-textless');
-    const silhouettes = nodes.map((node) => ({ w: node.offsetWidth, h: node.offsetHeight }));
-    for (const node of nodes) node.classList.remove('is-textless');
-    plateSizes = new Map(nodes.map((node, i) => [Number(node.dataset.osmId), {
-      full: full[i], diamond: silhouettes[i],
-      // Whether this plate has any words on the screen at all. On a narrow screen the six names are already dropped by
-      // the stylesheet, so a plate there has nothing left to give up - and its two boxes would look different anyway.
-      spoken: getComputedStyle(node.querySelector('.landmark-name')).display !== 'none',
-    }]));
-  }
-  function seatLandmarks() {
-    if (!plateSizes) return;
-    const entries = LANDMARKS.filter((landmark) => plateSizes.get(landmark.osmId).spoken).map((landmark) => {
-      const size = plateSizes.get(landmark.osmId);
-      // `anchor: 'bottom'` with `offset: [0, -6]` hangs the plate above its own point, so the box is built from that
-      // point rather than read off the element - and a plate that drops its name keeps its bottom centre where it was.
-      const point = map.project(landmark.center);
-      const hung = ({ w, h }) => ({ x: point.x - w / 2, y: point.y - 6 - h, w, h });
-      return { osmId: landmark.osmId, height: landmark.height, box: hung(size.full), diamond: hung(size.diamond) };
-    });
-    // A plate with no words on the screen has nothing to give up: on a narrow screen the six names are already dropped,
-    // and parking a silhouette there would take the landmark off the page entirely.
-    const states = new Map(LANDMARKS.map(({ osmId }) => [osmId, 'full']));
-    for (const { osmId, state } of declutter(entries)) states.set(osmId, state);
-    for (const [osmId, state] of states) {
-      const node = landmarkElements.get(osmId);
-      node.classList.toggle('is-textless', state !== 'full');
-      node.classList.toggle('is-hidden', state === 'hidden');
-    }
-  }
-  const repaintPlates = () => {
-    plateFrame ??= requestAnimationFrame(() => { plateFrame = undefined; seatLandmarks(); });
-  };
-  measurePlates();
-  seatLandmarks();
-  map.on('move', repaintPlates);
-  map.on('resize', () => { measurePlates(); seatLandmarks(); });
-  function landmarkCard(landmark) {
-    const card = document.createElement('div');
-    card.className = 'building-card landmark-card';
-    const title = document.createElement('h2');
-    title.textContent = landmark.name;
-    const latin = document.createElement('p');
-    latin.className = 'building-name-en';
-    latin.textContent = landmark.latin;
-    const facts = document.createElement('ul');
-    for (const line of landmarkFacts(landmark, landmarkForms?.forms ?? [])) {
-      const item = document.createElement('li');
-      item.className = 'building-fact';
-      item.textContent = line;
-      facts.append(item);
-    }
-    const intro = document.createElement('p');
-    intro.className = 'landmark-intro';
-    intro.textContent = landmark.intro;
-    intro.hidden = true;
-    const actions = document.createElement('div');
-    actions.className = 'landmark-actions';
-    const read = document.createElement('button');
-    read.type = 'button';
-    read.className = 'text-button';
-    read.textContent = '查看介绍';
-    read.setAttribute('aria-expanded', 'false');
-    read.addEventListener('click', () => {
-      intro.hidden = !intro.hidden;
-      read.setAttribute('aria-expanded', String(!intro.hidden));
-      read.textContent = intro.hidden ? '查看介绍' : '收起介绍';
-    });
-    const fly = document.createElement('button');
-    fly.type = 'button';
-    fly.className = 'text-button';
-    fly.textContent = '飞过去';
-    fly.addEventListener('click', () => flyToLandmark(landmark));
-    actions.append(read, fly);
-    card.append(title, latin, facts, intro, actions);
-    return card;
-  }
-  function openLandmark(landmark) {
-    stopOrbit(); tour.exit(); cancelFocus();
-    openPopup([{ lngLat: landmark.center }], landmarkCard(landmark), { closeLabel: '关闭地标卡片' });
-  }
-  // The labels step back while the camera travels and the one it flew to stays lit: a nameplate that keeps floating in
-  // front of a building being flown past is the thing that makes a fly-to look like a slideshow.
-  function flyToLandmark(landmark) {
-    const camera = approachCamera(landmark, map.getCanvas().clientHeight);
-    document.body.dataset.landmark = 'flying';
-    map.once('moveend', () => {
-      delete document.body.dataset.landmark;
-      for (const [osmId, node] of landmarkElements) node.classList.toggle('is-arrival', osmId === landmark.osmId);
-    });
-    map.flyTo({ ...camera, duration: reducedMotion.matches ? 0 : camera.duration });
-  }
+  // 命中测试认的那几层：卡片挂点要拿它判"本体还露不露"，所以先于卡片工厂建出来。
+  const extrusions = ['canton-tower-hit', 'landmark-forms-hit',
+    'neighborhood-buildings', 'neighborhood-buildings-overview', 'height-estimates', 'height-unknown'];
+  const cards = createCards({ map, extrusions, onClosed: () => { if (selection) { selection = null; writeHash(); } } });
+  const plates = createPlates({ map, landmarkForms, reducedMotion, interrupt: () => { stopOrbit(); tour.exit(); cancelFocus(); }, openPopup: cards.openPopup });
 
   let tourMarker;
   const tour = createTour(map, {
@@ -867,297 +376,11 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   });
 
   function stopOrbit() { orbiting = false; cancelAnimationFrame(frame); previousTime = undefined; writeHash(); }
-  function setOutline(features) {
-    const list = features ? (Array.isArray(features) ? features : [features]) : [];
-    map.getSource('building-selection')?.setData(featureCollection(list));
-  }
-  const rectOf = (selector) => {
-    const rect = document.querySelector(selector)?.getBoundingClientRect();
-    return rect?.width && rect?.height ? rect : null;
-  };
-  // MapLibre's own placement only knows the canvas edges, so the control bar, zoom stack, credits, header chips and the
-  // two drawers the user can have open are counted as occlusion too. Scored as [off-screen, controls, own block, control
-  // pill]: text clipped by the viewport is unreadable, a control the card has actually knocked out beats any placement
-  // that hides the building (the credits carry a licence that has to stay on screen), a card over its own building
-  // defeats the click, and the pill comes last because it can fade out instead of moving. A control counts by how much of
-  // *itself* disappears, and only past a quarter of it, so a card clipping the corner of the MapLibre logo does not
-  // outrank one that buries the block it is describing.
-  const occluders = ['.maplibregl-ctrl-bottom-right', '.maplibregl-ctrl-bottom-left', '.maplibregl-ctrl-attrib', '.topbar > *', '.search-panel', '.poi-panel'];
-  const rectsOf = (selector) => [...document.querySelectorAll(selector)].map((node) => node.getBoundingClientRect()).filter((rect) => rect.width && rect.height);
-  function occlusion(node) {
-    const card = node.querySelector('.maplibregl-popup-content')?.getBoundingClientRect();
-    if (!card) return [0, 0, 0, 0];
-    const area = (rect) => Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top);
-    const percent = (px) => Math.round(px / area(card) * 100);
-    const clip = (rect) => ({ left: Math.max(rect.left, 0), top: Math.max(rect.top, 0), right: Math.min(rect.right, innerWidth), bottom: Math.min(rect.bottom, innerHeight) });
-    const over = (rect) => rect ? area(clip({ left: Math.max(card.left, rect.left), top: Math.max(card.top, rect.top), right: Math.min(card.right, rect.right), bottom: Math.min(card.bottom, rect.bottom) })) : 0;
-    const hurt = (rect) => {
-      const visible = area(clip(rect));
-      return visible ? Math.max(0, Math.round(over(rect) / visible * 100) - 25) : 0;
-    };
-    // An extrusion is drawn upward from its base ring, so a card hung below the near corner or above the roof leaves the
-    // volume on screen while one hung above that corner covers it. queryRenderedFeatures only sees the rendered frame,
-    // which makes it an exact test for "is this block still visible under this card".
-    const hidesBlock = cardBlock === undefined ? 0 : Number(map.queryRenderedFeatures([[card.left, card.top], [card.right, card.bottom]], { layers: extrusions })
-      .some((feature) => String(feature.properties.osmId) === String(cardBlock)));
-    return [
-      percent(area(card) - area(clip(card))),
-      Math.max(0, ...occluders.flatMap((selector) => rectsOf(selector)).map(hurt)),
-      hidesBlock,
-      percent(over(rectOf('#view-controls'))),
-    ];
-  }
-  const lighter = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3];
-  function attach(lngLat, content, closeLabel, anchor, blockId) {
-    popup?.remove();
-    document.body.dataset.card = 'open';
-    // MapLibre's own focus-on-open calls focus() without preventScroll, and the browser then scrolls the overflow:hidden
-    // map container to reveal the button — by 45 px on a landscape phone, where a merged card is taller than the screen.
-    // The seat loop measures in the frame that scroll creates, and the container is back at 0 by the time the click is
-    // over, so a seat that measured flush with the bottom edge lands 45 px past it. The focus happens below instead: the
-    // keyboard still lands inside the card, and the map does not move under the measurement.
-    popup = new maplibregl.Popup({ offset: 20, maxWidth: '250px', closeButton: true, focusAfterOpen: false, anchor })
-      .setLngLat(lngLat).setDOMContent(content).addTo(map);
-    const close = popup.getElement().querySelector('.maplibregl-popup-close-button');
-    close.setAttribute('aria-label', closeLabel);
-    close.focus({ preventScroll: true });
-    cardBlock = blockId;
-    popup.on('close', () => { popup = undefined; cardBlock = undefined; document.body.dataset.card = 'closed'; document.body.dataset.cardPill = null; setOutline(null); if (selection) { selection = null; writeHash(); } });
-    return popup;
-  }
-  // A card whose point sits near a viewport edge gets clipped there, so the point is slid along the ground by exactly the
-  // amount that pulls the card back inside. The slide runs across the ground for the seats that hang above or below the
-  // block and down it for the seats that stand beside it, because sliding a side seat sideways is what pushes it back on
-  // top of the block. Only worth doing for cards the camera does not move under, since the shift is computed for the
-  // frame being measured.
-  function slideIntoView(axis) {
-    const rect = popup.getElement().getBoundingClientRect();
-    const shift = axis === 'x'
-      ? (rect.left < 8 ? 8 - rect.left : 0) + (rect.right > innerWidth - 8 ? innerWidth - 8 - rect.right : 0)
-      : (rect.top < 8 ? 8 - rect.top : 0) + (rect.bottom > innerHeight - 8 ? innerHeight - 8 - rect.bottom : 0);
-    if (!shift) return;
-    const pos = map.project(popup.getLngLat());
-    popup.setLngLat(map.unproject(axis === 'x' ? [pos.x + shift, pos.y] : [pos.x, pos.y + shift]));
-  }
-  // The pill flag is scored against the frame being measured, but a place card is opened before showPoi eases the
-  // camera under it, so the verdict goes stale. Recomputing it on every settled move keeps the pill faded only while a
-  // card really covers it.
-  function syncPill() {
-    if (popup) document.body.dataset.cardPill = occlusion(popup.getElement())[3] ? 'covered' : null;
-  }
-  function openPopup(seats, content, { outline = null, closeLabel, blockId }) {
-    // A card that can be re-seated is attached at every seat and measured, and the first that hides nothing wins. A POI
-    // card has a single seat because showPoi eases the camera under it right afterwards, and only MapLibre's own auto
-    // anchor is recomputed on every move.
-    const reseat = seats.length > 1;
-    let best, bestScore, attached;
-    for (const seat of seats) {
-      attach(seat.lngLat, content, closeLabel, seat.anchor, blockId);
-      attached = seat;
-      if (reseat) slideIntoView(seat.axis);
-      const measured = occlusion(popup.getElement());
-      if (!bestScore || lighter(measured, bestScore) < 0) { bestScore = measured; best = seat; }
-      if (!measured.some((score) => score)) break;
-    }
-    if (attached !== best) { attach(best.lngLat, content, closeLabel, best.anchor, blockId); if (reseat) slideIntoView(best.axis); }
-    syncPill();
-    setOutline(outline);
-  }
   function animate(time) {
     if (!orbiting) return;
     if (previousTime !== undefined) map.rotateTo(map.getBearing() + Math.min(time - previousTime, 100) * 0.003, { duration: 0 });
     previousTime = time;
     frame = requestAnimationFrame(animate);
-  }
-  // One loop dresses all three moving surfaces. The river advances one row of the tile per step, the tower's glow walks
-  // between its floor and the atmosphere's own baseline, and the traffic marches half a dash period at a time; all
-  // phases wrap, and every frame is derived from the pristine pixels rather than from the last drawn ones, so a long
-  // session cannot accumulate a drift the tile never had.
-  const MOTION_STEP_MS = 120, MOTION_BREATH_MS = 9000, HAZE_REVEAL_MS = 1500, TOWER_CYCLE_MS = 40000;
-  // 塔身灯光两档之间的那一段走查（V5 遗留③）。切换原来是一帧到位，按一下塔身就当众换了根管子。
-  // 这里走的不是"五色各自收成一色"——V5-7 量过那条路：预设五色横跨 0.68 个色相环，任何"各走最短路再汇合"
-  // 都会先把画面拉开再收（离散度实测 0.37→0.48→0），所以那一版把过渡整个撤了。这一版不让任何色相走路：
-  // 动的只有明度，先暗到一成、在最暗那一格换方案、再亮回来，0.6 s。
-  const TOWER_SWITCH_MS = 600, TOWER_FADE_DEPTH = 0.88;
-  const motion = { on: false, frame: undefined, previous: undefined, river: 0, breath: 0, traffic: 0, hue: 0, life: 0, lamp: 0, phase: 0, march: 0, steps: 0, pulses: 0, marches: 0, lights: 0, lampTicks: 0, pulse: 1 };
-  // Two night lighting schemes for the tower, and only one of them runs at a time: the colour cycle
-  // turns the five emissive colours round the wheel over 40 s, the breath walks their intensity. `single` is the
-  // default because V5-7 found a five-hue shaft reads as a toy.
-  // `towerMode` is what the shaft is painted with; `towerWanted` is what the buttons say. They only disagree for the
-  // 600 ms of a switch, which is the whole point: the control answers the click at once, the picture walks to it.
-  let towerMode = 'single';
-  let towerWanted = 'single';
-  let towerSwitch;
-  let towerFade = 1;
-  // The scheme the shaft is actually painted with. Resetting the two clocks here is what makes a switch land on the
-  // frame the new scheme ships with rather than on wherever the old one had got to.
-  function commitTowerMode(next) {
-    towerMode = next;
-    motion.hue = 0;
-    motion.breath = 0;
-    motion.pulse = 1;
-    towerLayer?.setHue(0);
-  }
-  /** Walks the shaft down, swaps the scheme at the bottom, walks it back up. Returns whether it wrote this frame. */
-  function stepTowerSwitch(time) {
-    if (towerSwitch === undefined) return false;
-    const at = (time - towerSwitch.at) / TOWER_SWITCH_MS;
-    if (at >= 0.5 && towerMode !== towerSwitch.to) commitTowerMode(towerSwitch.to);
-    if (at >= 1) {
-      towerSwitch = undefined;
-      towerFade = 1;
-    } else {
-      towerFade = 1 - TOWER_FADE_DEPTH * Math.sin(Math.max(0, Math.min(1, at)) * Math.PI);
-    }
-    towerLayer?.setPulse(motion.pulse, towerFade);
-    return true;
-  }
-  let hazeReveal;
-  // The opening is a reveal rather than a cut: the city starts under its own fog colour and the haze lifts over 1.5 s.
-  // `global-state` carries it because a data-driven colour follows that number without the style being re-validated
-  // forty times. Under a reduce request the page opens on the shipped pixels, which is the same end state.
-  function revealHaze(duration = HAZE_REVEAL_MS) {
-    if (hazeReveal !== undefined) return hazeStatus();
-    if (reducedMotion.matches) {
-      map.setGlobalStateProperty(HAZE_REVEAL, 0);
-      return hazeStatus();
-    }
-    const start = performance.now();
-    const step = (now) => {
-      const t = Math.min(1, (now - start) / duration);
-      const reveal = Math.round((1 - t) ** 2 * 1000) / 1000;
-      map.setGlobalStateProperty(HAZE_REVEAL, reveal);
-      // The shells read the same number the ramp reads; without this the city lifts out of the fog and three landmark
-      // towers stay behind it, still wearing the opening frame.
-      towerLayer?.setForms({ reveal });
-      if (t < 1) hazeReveal = requestAnimationFrame(step);
-      else {
-        hazeReveal = undefined;
-        map.setGlobalStateProperty(HAZE_REVEAL, 0);
-        towerLayer?.setForms({ reveal: 0 });
-      }
-    };
-    hazeReveal = requestAnimationFrame(step);
-    return hazeStatus();
-  }
-  function hazeStatus() {
-    return { reveal: map.getGlobalState()[HAZE_REVEAL] ?? 0, running: hazeReveal !== undefined, ms: HAZE_REVEAL_MS };
-  }
-  function motionFrame(time) {
-    if (!motion.on) return;
-    // A background tab stops rAF, so the first frame back carries the whole gap; without the clamp the river jumps.
-    const delta = motion.previous === undefined ? 0 : Math.min(time - motion.previous, 4 * MOTION_STEP_MS);
-    motion.previous = time;
-    motion.river += delta;
-    motion.breath += delta;
-    // A tower-scheme switch is the one thing here that wants the frame rather than the 120 ms tick: it is a material
-    // write with no style behind it, and five steps over 600 ms would read as a stutter. It only runs while a switch
-    // is in flight, so a page that never presses the button pays nothing.
-    stepTowerSwitch(time);
-    if (motion.river >= MOTION_STEP_MS) {
-      const steps = Math.floor(motion.river / MOTION_STEP_MS);
-      motion.river -= steps * MOTION_STEP_MS;
-      if (scrollRiver(steps)) motion.steps += steps;
-      if (towerLayer) {
-        if (towerMode === 'breath') {
-          motion.pulse = towerBreath((motion.breath % MOTION_BREATH_MS) / MOTION_BREATH_MS);
-        } else {
-          motion.hue += steps * MOTION_STEP_MS;
-          towerLayer.setHue(towerHue((motion.hue % TOWER_CYCLE_MS) / TOWER_CYCLE_MS), towerMode);
-          motion.pulse = 1;
-        }
-        // The switch's dip rides the same channel the breath does, so it multiplies rather than replacing it.
-        towerLayer.setPulse(motion.pulse, towerFade);
-        motion.pulses++;
-        // The crowns ride the same elapsed clock on their own 7 s and 8 s, so no two of the three towers share a beat.
-        towerLayer.setBreath(motion.breath);
-        // The near field rides this tick rather than the frame. The river has already dirtied the style on this step, so
-        // an advance costs no extra repaint, and 120 ms at the fastest speed on the table is 1.7 m - under the pixel the
-        // hero camera resolves. A continuous march is what this layer is for: `line-dasharray` could not do it at all,
-        // which is why the ribbons two kilometres out are still stepped.
-        // The gate is the lens, not the night. Cars and walkers are models rather than lamps, so they are on the picture
-        // in daylight too, and a clock gated on `trafficVisible` left the whole near field frozen outside night - which is
-        // the same traffic two kilometres further out doing nothing at noon.
-        if (lens.mode !== 'height') {
-          motion.life += steps * MOTION_STEP_MS;
-          towerLayer.runTraffic(motion.life / 1000, map.getZoom());
-          motion.lights += steps;
-        }
-        // The lamps cross-fade on the same tick, and they cost two numbers. Their weight is read by the layer's own
-        // opacity every frame, which is the only channel this scene can animate a wall through: the pattern a
-        // `fill-extrusion` shows is baked into its bucket when the tile is tessellated, and rewriting the image behind
-        // the name was proved not to reach the screen. The two groups start at cycle 0 together - the shipped frame -
-        // and their periods share no factor, so they drift apart from the first minute and never realign.
-        if (atmosphereId === 'night' && lens.mode !== 'height') {
-          motion.lamp += steps * MOTION_STEP_MS;
-          for (const group of [0, 1]) {
-            map.setGlobalStateProperty(LAMP_KEYS[group], lampWeight((motion.lamp / LAMP_PERIODS_MS[group]) % 1));
-          }
-          motion.lampTicks += steps;
-        }
-      }
-    }
-    motion.traffic += delta;
-    if (motion.traffic >= TRAFFIC_STEP_MS) {
-      const steps = Math.floor(motion.traffic / TRAFFIC_STEP_MS);
-      motion.traffic -= steps * TRAFFIC_STEP_MS;
-      // Two layouts, alternating: the dash array is a stepped property, and the motion rules hold a step to twice a
-      // second. Writing it once per frame would re-tessellate every road in view sixty times a second for nothing.
-      // And it is only written when the streets are actually on screen: a day scene has nothing to march, and a
-      // `setPaintProperty` on a hidden layer still dirties the style and costs a repaint.
-      if (trafficVisible) {
-        motion.march = (motion.march + steps) % MARCH_PHASES.length;
-        marchLights(motion.march);
-        motion.marches += steps;
-      }
-    }
-    motion.frame = requestAnimationFrame(motionFrame);
-  }
-  function scrollRiver(steps) {
-    const tile = riverTiles[atmosphereId];
-    if (!tile) return false;
-    motion.phase = (motion.phase + steps) % tile.height;
-    map.updateImage(`${WATER_IMAGE_PREFIX}-${atmosphereId}`, scrollWater(tile, motion.phase));
-    return true;
-  }
-  // Turning motion off is not pausing: the tiles go back to the rows they shipped on and the tower to the intensities
-  // the atmosphere set for it, so the frame left on screen is one a page without this feature would have drawn.
-  // A scene with neither a river tile nor a tower has nothing for the loop to redraw, so it must not run at all:
-  // an idle requestAnimationFrame still wakes the tab sixty times a second and drains a phone for no picture.
-  function motionAvailable() { return Object.keys(riverTiles).length > 0 || Boolean(towerLayer); }
-  function setMotion(next) {
-    const on = Boolean(next) && motionAvailable();
-    if (on !== motion.on) {
-      motion.on = on;
-      if (on) {
-        motion.previous = undefined;
-        motion.frame = requestAnimationFrame(motionFrame);
-      } else {
-        cancelAnimationFrame(motion.frame);
-        Object.assign(motion, { frame: undefined, previous: undefined, river: 0, breath: 0, traffic: 0, hue: 0, phase: 0, march: 0, life: 0, lamp: 0, pulse: 1 });
-        // A switch that was mid-dip finishes here rather than being left half walked: the painted scheme becomes the
-        // one the buttons already show, and the shaft comes back up to the preset's own emission.
-        if (towerSwitch !== undefined) { towerSwitch = undefined; towerFade = 1; towerMode = towerWanted; }
-        for (const [id, tile] of Object.entries(riverTiles)) map.updateImage(`${WATER_IMAGE_PREFIX}-${id}`, scrollWater(tile, 0));
-        marchLights(0);
-        // Handing back means the frame a page without any of this would have drawn: the shipped dash, the preset's own
-        // emission, the preset's own colour rather than wherever the wheel had got to, the vehicles back on the spacing
-        // their own ways give them, and every block on its shipped pick of windows rather than wherever the evening's
-        // cross-fade had drifted.
-        for (const key of LAMP_KEYS) map.setGlobalStateProperty(key, 1);
-        towerLayer?.setPulse(1);
-        towerLayer?.setHue(0);
-        towerLayer?.setBreath(0);
-        towerLayer?.runTraffic(0, map.getZoom());
-      }
-    }
-    onMotionChange?.(motionStatus());
-    return motionStatus();
-  }
-  function motionStatus() {
-    const state = map.getGlobalState();
-    return { on: motion.on, available: motionAvailable(), stepMs: MOTION_STEP_MS, breathMs: MOTION_BREATH_MS, marchMs: TRAFFIC_STEP_MS, cycleMs: TOWER_CYCLE_MS, lampMs: LAMP_PERIODS_MS, towerMode: towerWanted, towerPainted: towerMode, towerSwitchMs: TOWER_SWITCH_MS,
-      towerFade: Math.round(towerFade * 1000) / 1000, phase: motion.phase, steps: motion.steps, pulses: motion.pulses, march: motion.march, marches: motion.marches, lights: motion.lights, lamps: LAMP_KEYS.map((key) => state[key] ?? 1), lampTicks: motion.lampTicks, tiles: Object.keys(riverTiles).length };
   }
   // What the near field is made of, for the panel and for the acceptance test: how many lights the snapshot's own ways
   // carry, how far out they stop, and whether the night theme currently has them burning. 形状由 `src/near-field.js`
@@ -1177,12 +400,12 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     if (!greenery) return null;
     return { ...greenery.report, visible: greenery.group.visible, minZoom: TREE_MIN_ZOOM, zoom: map.getZoom() };
   }
-  function motionPreference() { setMotion(!reducedMotion.matches); }
+  function motionPreference() { motionApi.setMotion(!reducedMotion.matches); }
   film = createFilm({
     draw(elapsed) {
       const view = filmFrame(elapsed, { width: innerWidth, height: innerHeight });
       if (filmShot !== view.index) {
-        setAtmosphere(view.shot.mood, { instant: reducedMotion.matches || filmShot < 0, duration: 3200 });
+        atmosphere.set(view.shot.mood, { instant: reducedMotion.matches || filmShot < 0, duration: 3200 });
         filmShot = view.index;
       }
       map.jumpTo(view.camera);
@@ -1192,7 +415,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
       if (!filmSaved) return;
       const saved = filmSaved;
       filmSaved = undefined;
-      setAtmosphere(saved.mood, { instant: true });
+      atmosphere.set(saved.mood, { instant: true });
       // setSky only compares supplied keys, so omitted transition keys need an explicit reset.
       map.setSky({ 'sky-color-transition': undefined, 'horizon-color-transition': undefined, 'fog-color-transition': undefined, ...saved.sky });
       lens = saved.lens;
@@ -1207,11 +430,11 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   });
   function startFilm() {
     if (film.active) return;
-    tour.exit(); stopOrbit(); cancelFocus(); popup?.remove(); map.stop();
+    tour.exit(); stopOrbit(); cancelFocus(); cards.close(); map.stop();
     filmSaved = {
       camera: { center: map.getCenter().toArray(), zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(), padding: map.getPadding() },
       width: innerWidth, height: innerHeight,
-      lens: { ...lens }, mood: atmosphereId, sky: map.getSky(),
+      lens: { ...lens }, mood: atmosphere.id, sky: map.getSky(),
       layers: map.getStyle().layers.filter((layer) => layer.type === 'symbol' || layer.id === 'radius-line')
         .map((layer) => [layer.id, map.getLayoutProperty(layer.id, 'visibility') ?? 'visible']),
     };
@@ -1228,7 +451,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   }
   function preferenceInteraction() {
     stopOrbit(); tour.exit();
-    if (reducedMotion.matches && film.active) { film.reduce(); settleAtmosphere(); }
+    if (reducedMotion.matches && film.active) { film.reduce(); atmosphere.settle(); }
     onInteraction();
   }
   let wasLandscape = landscape();
@@ -1275,8 +498,6 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // Trackpad pointers land a few pixels off a ~20 px icon, so hit-test a small box instead of one point.
   const box = (point, size) => [[point.x - size, point.y - size], [point.x + size, point.y + size]];
   const poiAt = (point) => map.queryRenderedFeatures(box(point, 6), { layers: ['poi-markers'] });
-  const extrusions = ['canton-tower-hit', 'landmark-forms-hit',
-    'neighborhood-buildings', 'neighborhood-buildings-overview', 'height-estimates', 'height-unknown'];
   const buildingAt = (point) => {
     const hits = map.queryRenderedFeatures(box(point, 2), { layers: extrusions });
     return hits.find((hit) => hit.properties.tower) ?? hits[0] ?? null;
@@ -1399,7 +620,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   // Both verdicts below were measured against the frame they were computed in: after the camera settles under a
   // stationary pointer, or re-sits an open card, they have to be taken again.
   map.on('moveend', () => {
-    syncPill();
+    cards.syncPill();
     writeHash();
     if (focus) focusStep();
     if (hoverPoint) hoverFrame ??= requestAnimationFrame(hoverCursor);
@@ -1414,14 +635,10 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     film.exit();
     tour.exit();
     stopOrbit();
-    motion.on = false;
-    cancelAnimationFrame(motion.frame);
-    cancelAnimationFrame(moodRun?.frame);
-    moodRun = undefined;
-    cancelAnimationFrame(hazeReveal);
-    hazeReveal = undefined;
+    motionApi.cancel();
+    atmosphere.cancel();
     cancelAnimationFrame(hoverFrame);
-    cancelAnimationFrame(plateFrame);
+    plates.cancel();
     clearTimeout(focus?.timer);
     document.removeEventListener('visibilitychange', visibilityChange);
     reducedMotion.removeEventListener('change', preferenceInteraction);
@@ -1443,16 +660,16 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   }
   // Motion obeys the same preference the camera eases and the tour already obey: under a reduce request the page opens
   // on the shipped pixels and lighting rather than on a loop that is one frame into its first cycle.
-  setMotion(!reducedMotion.matches);
-  revealHaze();
+  motionApi.setMotion(!reducedMotion.matches);
+  motionApi.revealHaze();
   return {
     map,
-    revealHaze,
-    get haze() { return hazeStatus(); },
-    setAtmosphere,
-    get atmosphere() { return moodStatus(); },
-    settleAtmosphere,
-    setMotion,
+    revealHaze: motionApi.revealHaze,
+    get haze() { return motionApi.hazeStatus(); },
+    setAtmosphere: atmosphere.set,
+    get atmosphere() { return atmosphere.status(); },
+    settleAtmosphere: atmosphere.settle,
+    setMotion: motionApi.setMotion,
     // What the landmark shells and their lamps are showing on this frame. The night's whole point is that these are
     // moving, and a screenshot cannot tell a slow breath from a still one - so the acceptance reads the materials.
     get landmarkLights() {
@@ -1473,19 +690,8 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     get towerSpill() {
       return towerLayer?.spillState() ?? null;
     },
-    setTowerMode(next) {
-      const mode = TOWER_MODES.includes(next) ? next : TOWER_MODES[0];
-      towerWanted = mode;
-      // Pressing the same button again while a switch is walking does not restart the dip - it retargets it, so the
-      // shaft never climbs partway and falls again. With the loop stopped there is nothing to walk: the preset's own
-      // frame is one write away, and that is also what a reduced-motion page gets.
-      if (towerSwitch !== undefined) towerSwitch.to = mode;
-      else if (!motion.on) commitTowerMode(mode);
-      else towerSwitch = { to: mode, at: performance.now() };
-      onMotionChange?.(motionStatus());
-      return motionStatus();
-    },
-    motionStatus,
+    setTowerMode: motionApi.setTowerMode,
+    motionStatus: motionApi.motionStatus,
     nearTraffic,
     nearTrees,
     plazaState,
@@ -1495,24 +701,24 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     tour,
     film,
     startFilm,
-    startTour() { film.exit(); stopOrbit(); cancelFocus(); popup?.remove(); resetLens(); tour.start(!reducedMotion.matches); },
-    setPanelOpen(open) { panelOpen = open; popup?.remove(); manualInteraction(); map.setLayoutProperty('poi-markers', 'visibility', open ? 'visible' : 'none'); map.easeTo({ padding: padding(), duration: reducedMotion.matches ? 0 : 400 }); },
+    startTour() { film.exit(); stopOrbit(); cancelFocus(); cards.close(); resetLens(); tour.start(!reducedMotion.matches); },
+    setPanelOpen(open) { panelOpen = open; cards.close(); manualInteraction(); map.setLayoutProperty('poi-markers', 'visibility', open ? 'visible' : 'none'); map.easeTo({ padding: padding(), duration: reducedMotion.matches ? 0 : 400 }); },
     setPois(pois, category = 'all') {
       poiFeatures = pois; activeFilter = category;
-      if (popup && !pois.some((poi) => poi.id === selectedPoiId && (category === 'all' || poi.category === category))) popup.remove();
+      if (cards.hasCard() && !pois.some((poi) => poi.id === selectedPoiId && (category === 'all' || poi.category === category))) cards.close();
       map.getSource('neighborhood-pois').setData(poisGeoJSON(pois));
       map.setFilter('poi-markers', category === 'all' ? null : ['==', ['get', 'category'], category]);
     },
     showPoi(poi, content) {
       if (!poiFeatures.some((item) => item.id === poi.id) || (activeFilter !== 'all' && activeFilter !== poi.category)) return;
       manualInteraction(); selectedPoiId = poi.id;
-      openPopup([{ lngLat: [poi.lng, poi.lat], anchor: undefined }], content, { closeLabel: '关闭地点卡片' });
+      cards.openPopup([{ lngLat: [poi.lng, poi.lat], anchor: undefined }], content, { closeLabel: '关闭地点卡片' });
       map.easeTo({ center: [poi.lng, poi.lat], padding: padding(), duration: reducedMotion.matches ? 0 : 700 });
     },
     showBuilding(building, content) {
       manualInteraction();
       const blockId = buildingId(building.properties.osmId) || undefined;
-      openPopup(buildingSeats(building.outline.geometry, building.lngLat, blockId), content, {
+      cards.openPopup(buildingSeats(building.outline.geometry, building.lngLat, blockId), content, {
         outline: selectionOutline(building.outline),
         closeLabel: '关闭建筑卡片',
         blockId,
@@ -1520,16 +726,16 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
     },
     focusBuilding,
     startOrbit() {
-      film.exit(); tour.exit(); stopOrbit(); popup?.remove(); map.stop(); cancelFocus();
+      film.exit(); tour.exit(); stopOrbit(); cards.close(); map.stop(); cancelFocus();
       map.jumpTo({ center, zoom: landscape() ? Math.max(14, Math.min(map.getZoom(), 14.4)) : Math.max(14.6, Math.min(map.getZoom(), 15.7)), pitch: 58, padding: padding() });
       orbiting = true; frame = requestAnimationFrame(animate);
     },
     stopOrbit,
-    hasCard: () => Boolean(popup),
-    closeCard() { popup?.remove(); },
-    recenter() { film.exit(); tour.exit(); stopOrbit(); cancelFocus(); popup?.remove(); map.flyTo({ ...heroCamera(), duration: reducedMotion.matches ? 0 : 1200 }); },
+    hasCard: cards.hasCard,
+    closeCard: cards.close,
+    recenter() { film.exit(); tour.exit(); stopOrbit(); cancelFocus(); cards.close(); map.flyTo({ ...heroCamera(), duration: reducedMotion.matches ? 0 : 1200 }); },
     overview() {
-      film.exit(); tour.exit(); stopOrbit(); cancelFocus(); popup?.remove();
+      film.exit(); tour.exit(); stopOrbit(); cancelFocus(); cards.close();
       const points = circle.geometry.coordinates[0];
       const bounds = points.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
       // fitBounds adds its own padding to the current transform padding.

@@ -220,7 +220,9 @@ test('map removal cancels movie and atmosphere frames; cleanup checks reject mis
   };
   for (const missing of [null, 'moodRun?.frame', 'hazeReveal']) {
     let injected = 0;
-    if (missing) await page.route((url) => url.pathname === '/src/map.js', async (route) => {
+    // #219 拆分后这两句各自跟着工厂走：氛围时钟在 map/atmosphere.js 的 cancelMood，雾揭示在 map/motion.js 的 cancel。
+    const home = { 'moodRun?.frame': '/src/map/atmosphere.js', hazeReveal: '/src/map/motion.js' }[missing];
+    if (missing) await page.route((url) => url.pathname === home, async (route) => {
       const response = await route.fetch();
       const source = await response.text(), statement = `cancelAnimationFrame(${missing});`;
       expect(source.split(statement).length - 1).toBe(1);
