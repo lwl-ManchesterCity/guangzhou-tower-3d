@@ -4306,7 +4306,7 @@ test('the near field puts vehicles on the streets, walkers on the paths, and sto
 
   // 项 1：白昼的时钟。这条判据存在的理由是它曾经为 0 —— 近场的推进挂在"光带亮不亮"那道闸门上，所以除了夜景
   // 之外没有任何氛围走过它，两公里外的光带在动、脚底下的车却是停的。量计数器而不是量像素：这一层的贴图会因
-  // 改样式而重图集，像素差量到的是渲染器的抖动（README 的 #114 一条），计数器轨证明"在算"，画面轨由下面
+  // 改样式而重图集，像素差量到的是渲染器的抖动（DEVELOPMENT.md 的 #114 一条），计数器轨证明"在算"，画面轨由下面
   // `lit()` 那一对 A/B 承担。
   const ticksIn = (ms) => page.evaluate(async (ms) => {
     const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
@@ -4469,7 +4469,7 @@ test('the near field puts vehicles on the streets, walkers on the paths, and sto
   const addedWarm = inside.withField.warm - inside.withoutField.warm;
   // 门槛 100 → 60：这两个数是随实例数走的。车距 55 → 100 m（用户 2026-10-09「车辆太多太密集」）把 1,981 辆
   // 降到 1,298 辆，同一扇窗里量到的是白 109／红 97。这条判据要防的是"灯层静默不画"——已知两个缺陷值是
-  // 0（整层关掉）与 31（灯珠留在 1.9 m 被自己的车体吞掉，见 README 第 20 项）——所以 60 仍在缺陷值之上
+  // 0（整层关掉）与 31（灯珠留在 1.9 m 被自己的车体吞掉，见 DEVELOPMENT.md 第 20 项）——所以 60 仍在缺陷值之上
   // 近一倍、在健康值之下近一倍，两边都留得下腰斩与静默。不是把门槛挪到健康值以下让它绿：那样 31 也会绿。
   expect(addedWhite,
     `the field added ${addedWhite} headlight pixels to a street at ${both.near.metres} m`).toBeGreaterThan(60);

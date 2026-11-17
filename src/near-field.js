@@ -50,7 +50,7 @@ export function createNearField({ streets = [], river = [], shore = [], origin, 
   return {
     groups,
     counts: { cars: traffic?.counts.cars ?? 0, walkers: traffic?.counts.walkers ?? 0, boats: boats?.counts.boats ?? 0 },
-    /** 湿线那一层的账（几圈、几圈被水面宽度闸门拒掉），判据与 README 读这一格。 */
+    /** 湿线那一层的账（几圈、几圈被水面宽度闸门拒掉），判据与 DEVELOPMENT.md 读这一格。 */
     shoreBand: wet?.report ?? null,
     /** 灯的底账：派生出几个路口、几个进口道真接上了灯、三层几何各多少台。 */
     signals: { junctions: junctions.length, ...(traffic?.signals ?? { approaches: 0, poles: 0, lines: 0 }) },

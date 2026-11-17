@@ -127,7 +127,7 @@ test('只有一个轴的路口不把主路按住半周期红灯：绿 80 而不�
   assert.equal(signalState(junction, junction.solo, 80), 'amber');
   assert.equal(signalState(junction, 1 - junction.solo, 60), 'red', '另一轴在主路绿灯期间也亮了');
   assert.deepEqual([greensOf(junction, junction.solo), greensOf(junction, 1 - junction.solo)], [80, 13],
-    '一轴路口的绿灯分档变了：README 的示意口径要跟着改');
+    '一轴路口的绿灯分档变了：DEVELOPMENT.md 的示意口径要跟着改');
   // 两轴路口那一半不许跟着变：还是各 40 秒。
   const both = deriveJunctions({ features: cross(), origin: DEFAULT_CENTER, radius: CROSS_RADIUS })[0];
   both.offset = 0;
@@ -158,7 +158,7 @@ test('周期是绿 40 / 黄 3 / 另一轴绿 40，两轴绝不同时绿', () => 
   }
   assert.deepEqual([tally[0].green, tally[0].amber, tally[1].green, tally[1].amber], [40, 3, 40, 3]);
   assert.deepEqual([SIGNAL_GREEN_SECONDS, SIGNAL_AMBER_SECONDS, SIGNAL_CYCLE_SECONDS], [40, 3, 96],
-    '周期这三个数被改动了：README 与卡片上的示意口径要跟着改');
+    '周期这三个数被改动了：DEVELOPMENT.md 与卡片上的示意口径要跟着改');
   // 43~46 是全红清空，89~96 是另一段清空。
   assert.equal(tally[0].red, 53);
 });
@@ -214,7 +214,7 @@ test('红灯把车钉在自己的排队位次上：一列，而不是叠在停�
     assert.ok(Math.abs(gap - SIGNAL_QUEUE_PITCH_METRES) < 1.2,
       `位次 ${index - 1} 与 ${index} 之间隔了 ${gap.toFixed(2)} m，不是一个车位`);
   }
-  assert.equal(SIGNAL_QUEUE_PITCH_METRES, 8, '车位间距这一格被改动：判据与 README 要一起改');
+  assert.equal(SIGNAL_QUEUE_PITCH_METRES, 8, '车位间距这一格被改动：判据与 DEVELOPMENT.md 要一起改');
   assert.equal(SIGNAL_HEADWAY_SECONDS, 2.6, '放行间隔被改动：排队放行的节奏要一起看');
   // 头车就停在停止线上（一列是从它往后排的）。
   const stop = ranked[0].line.at(ranked[0].signal.stop);

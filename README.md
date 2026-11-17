@@ -4,6 +4,10 @@
 
 ![广州 · 一江两岸｜六幕预览](docs/film/guangzhou-film.gif)
 
+**在线演示**：<https://lwl-ManchesterCity.github.io/guangzhou-tower-3d/> —— 无需安装，打开即看（瓦片走 OpenFreeMap 公网，首次加载需联网）。后面那些查询参数在线上同样可用：`?engine=three` 换引擎、`?film=1` 自动进片。
+
+本地开发（先 `npm run dev`）：
+
 - 广州塔（现版，MapLibre GL JS）：`http://127.0.0.1:5174`
 - 同一份数据的新引擎（three.js）：`http://127.0.0.1:5174/?engine=three`
 - 48 秒城市短片：`http://127.0.0.1:5174/?film=1`（自动进片）
@@ -94,8 +98,13 @@ npm test
 - `src/search.js` / `src/link.js`：文本归一化与分档排序、`#map=…&b=…` 视角链接的解析与格式化；`src/pois.js` / `src/geo.js`：Overpass 请求与缓存、球面距离与范围多边形。
 - `src/main.js` / `src/style.css` / `index.html`：界面结构、透视镜渲染与事件、氛围切换、导览控制条、检索面板、按需地点面板与安全文本卡片。
 - `src/film.js`：宣传片——六幕镜头、字幕与进度条、暂停／切幕／退出，以及「减少动态效果」下的降级。
-- `tests/*.test.js`：**532 项** Node 测试（29 册），覆盖地图/建筑/POI/氛围/透视镜/导览契约与快照、链接、贴图、近场装配等；每格新断言都配一条自己的源码变异，不以导入错误替代断言失败。
-- `tests/browser.spec.js` / `tests/engine.browser.spec.js`：**58 项**真实浏览器验收，`npm run test:browser`（`--workers=1`，整套 29～39 分钟）。逐项读数、历史验收记录与全部截图清单见 [`DEVELOPMENT.md`](DEVELOPMENT.md)。
+- `tests/*.test.js`：**549 项** Node 测试（31 册），覆盖地图/建筑/POI/氛围/透视镜/导览契约与快照、链接、贴图、近场装配等；每格新断言都配一条自己的源码变异，不以导入错误替代断言失败。
+- `tests/browser.spec.js` / `tests/engine.browser.spec.js` / `tests/film.browser.spec.js`：**66 项**真实浏览器验收（含宣传片 8 项），`npm run test:browser`（`--workers=1`，整套 29～39 分钟）。逐项读数、历史验收记录与全部截图清单见 [`DEVELOPMENT.md`](DEVELOPMENT.md)。
+
+## 许可
+
+- **代码**：MIT，见 [`LICENSE`](LICENSE)。
+- **数据**：`public/data/` 与 `data/` 里的地图与建筑数据派生自 OpenStreetMap（经 OpenFreeMap 与 Overpass），按 **ODbL-1.0** 授权；再分发须保留 ODbL 与 OpenStreetMap / OpenFreeMap 署名。
 
 ## 开发日志
 

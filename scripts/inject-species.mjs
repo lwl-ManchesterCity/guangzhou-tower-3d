@@ -1,4 +1,4 @@
-// 一次性：给"三种树"这批新判据做缺陷注入。跑完就删（README 的撤销那节不引它）。
+// 一次性：给"三种树"这批新判据做缺陷注入。跑完就删（DEVELOPMENT.md 的撤销那节不引它）。
 import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 

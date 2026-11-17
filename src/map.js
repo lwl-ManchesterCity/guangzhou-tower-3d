@@ -427,7 +427,7 @@ export async function createNeighborhoodMap({ onPoiClick, onBuildingClick, onInt
   });
   // 楼根那一圈接地带：轮廓是实测的（OSM 那份晋升后的快照），宽度与深浅是画的。
   // 它跟着楼走：透视镜一开、或按类别筛的时候一起没——合并成一份几何就没有"逐栋筛"这一说，
-  // 这是这一块的边界，写在 `shadow-pads.js` 的注释里，也记在 README。
+  // 这是这一块的边界，写在 `shadow-pads.js` 的注释里，也记在 DEVELOPMENT.md。
   const bases = createBaseBands({ features: buildings.features, origin: DEFAULT_CENTER });
   const towerLayer = createTowerLayer(landmarkForms, nearField, river, greenery, plazaGround, bases);
   const towerHeight = 450;

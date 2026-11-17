@@ -1,5 +1,5 @@
 // 夜景换窗的幅度与"成簇度"：把动效停住，只钉两组权重（`setGlobalStateProperty` 不是样式改动，
-// 不会触发 MapLibre 的重图集，所以这一对比是干净的；改可见性才会，见 README 的 #114 一条）。
+// 不会触发 MapLibre 的重图集，所以这一对比是干净的；改可见性才会，见 DEVELOPMENT.md 的 #114 一条）。
 // 两个量分开看：`moved` 是变了多少颗，`cluster` 是"最挤的 24×24 小窗里同时变了多少颗"——
 // 后者才是"整栋灭"与"全城各换一格"的分水岭：像素总数可以一样，成簇度差一个量级。
 import { chromium } from '@playwright/test';

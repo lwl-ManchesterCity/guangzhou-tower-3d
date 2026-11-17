@@ -1,4 +1,4 @@
-// 一次性：给 #177 那两条 teardown 判据做缺陷注入。跑完就删，README 里记结果。
+// 一次性：给 #177 那两条 teardown 判据做缺陷注入。跑完就删，DEVELOPMENT.md 里记结果。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 

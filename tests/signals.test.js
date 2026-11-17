@@ -147,7 +147,7 @@ test('杆、灯珠、停止线三层的米数都落在进口道自己的几何�
     POLE_METRES, POLE_KERB_OFFSET_METRES, LENS_METRES, LENS_TOP_METRES, LENS_REACH_METRES, POLE_LIFT_METRES,
     STOP_LINE_LIFT_METRES, SIGNAL_QUEUE_PITCH_METRES],
   [0.55, 0.6, 3.6, 0.5, 3.2, 5.4, 0.42, 0.25, 0.25, 0.32, 0.34, 8],
-  '这几格米数与档位被改动了：README 的示意口径要一起改');
+  '这几格米数与档位被改动了：DEVELOPMENT.md 的示意口径要一起改');
   props.dispose();
   assert.equal(props.group.children.length, 0, 'dispose 没把三层收掉');
 });

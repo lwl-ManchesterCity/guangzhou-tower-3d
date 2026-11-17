@@ -1,0 +1,45 @@
+name: Deploy to GitHub Pages
+
+# 推 main 就构建并发布到 Pages；也可在 Actions 页手动触发。
+# 构建时传 --base=/guangzhou-tower-3d/，让 import.meta.env.BASE_URL 指到子路径，
+# 本地 dev / build 不带这个参数，仍是根路径，互不影响。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一条发布，新的推上来就取消旧的排队。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -- --base=/guangzhou-tower-3d/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

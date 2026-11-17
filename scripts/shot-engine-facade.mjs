@@ -1,6 +1,6 @@
 // V8 Phase 2 的成图：同一机位、同一氛围，把新引擎与现版各拍一张，存进 docs/screenshots/。
 //   node scripts/shot-engine-facade.mjs
-// 命名成 `engine-facade-<mode>-<engine>.png`，README 里两两并排贴。
+// 命名成 `engine-facade-<mode>-<engine>.png`，DEVELOPMENT.md 里两两并排贴。
 import { chromium } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 

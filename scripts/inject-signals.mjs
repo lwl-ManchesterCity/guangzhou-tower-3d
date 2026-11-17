@@ -1,4 +1,4 @@
-// 一次性：给"路口信号灯 / 停止线 / 排队"这批新判据做缺陷注入（页面内第 6 项）。跑完就删，README 里记结果。
+// 一次性：给"路口信号灯 / 停止线 / 排队"这批新判据做缺陷注入（页面内第 6 项）。跑完就删，DEVELOPMENT.md 里记结果。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 

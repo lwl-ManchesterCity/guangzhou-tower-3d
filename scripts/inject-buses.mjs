@@ -1,4 +1,4 @@
-// 一次性：给"两档尺度"这批新判据做缺陷注入（页面内第 3 项）。跑完就删，README 里记结果。
+// 一次性：给"两档尺度"这批新判据做缺陷注入（页面内第 3 项）。跑完就删，DEVELOPMENT.md 里记结果。
 import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 

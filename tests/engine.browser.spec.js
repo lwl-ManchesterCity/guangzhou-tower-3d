@@ -833,7 +833,7 @@ test('the new engine drives the near field and cross-fades the windows on the sh
   const shipped = await shot(1, 1);
   const swapped = await shot(0, 1);
   // 分母：把灯火那八层藏起来再拍一张，与出厂那一帧的差就是"这两层在画面上到底值多少像素"。
-  // 这一步在现版那侧是踩不得的（改样式会触发重图集，见 README 的 #114 一条），在新引擎这一侧是干净的：
+  // 这一步在现版那侧是踩不得的（改样式会触发重图集，见 DEVELOPMENT.md 的 #114 一条），在新引擎这一侧是干净的：
   // 这里没有按上传历史重排的图集，藏与不藏只差那八发的绘制。
   await page.evaluate(() => {
     const hidden = [];

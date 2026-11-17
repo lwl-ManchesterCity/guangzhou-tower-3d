@@ -7,7 +7,7 @@ import { createPads } from './shadow-pads.js';
 // 近场的绿化不再是地面上的一块颜色。OSM 在这一公里里到底有多少树是量过的：`natural=tree` 一共 6 个点，
 // `natural=tree_row` 0 条（3 公里内才有 173 个点、14 条）。所以"按真树摆"这条路在塔边是空的，能立起来的只有
 // 两件事——沿实测的路中线放行道树，和在实测的绿地面里按面积放树冠。两者的位置都从矢量算出来，一个都不手摆；
-// 间距、密度、树高是画的，都写成命名常量，卡片与 README 上点名。
+// 间距、密度、树高是画的，都写成命名常量，卡片与 DEVELOPMENT.md 上点名。
 export const VEGETATION_RADIUS = 1000;
 
 // 只有这两级路有那种够宽的绿化带：近场实测 trunk 3,818 m、secondary 7,154 m，加起来 11 km。

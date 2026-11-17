@@ -12,7 +12,7 @@ export const PLAZA_POOL = 'plaza-pool';
 export const PLAZA_STONE = 'plaza-stone';
 export const PLAZA_WALK = 'plaza-walk';
 
-// 一条步行街多宽。OSM 在这里没有给任何一条 `width`，所以这两个数是画的，卡片与 README 要点名。
+// 一条步行街多宽。OSM 在这里没有给任何一条 `width`，所以这两个数是画的，卡片与 DEVELOPMENT.md 要点名。
 export const WALK_WIDTH_METRES = 6;
 export const STEPS_WIDTH_METRES = 4;
 // 斜接伸出多长：转角越尖，把两边法线平均出来的那根 miter 越长，超过三倍就改成平接，否则会在内角顶出一个尖刺。

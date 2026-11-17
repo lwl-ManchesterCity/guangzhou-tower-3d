@@ -2,6 +2,19 @@
 
 按日期倒序，最新的在最前面。这里是逐轮改动的记录：每件事为什么做、实测到什么数、怎么撤销；当前版本的说明与用法在 [`README.md`](README.md)。本文件里的相对路径（`docs/screenshots/…`、`docs/film/…`）与 README 同处仓库根目录，可直接打开。
 
+## 开源配套：许可、在线演示与仓库瘦身（2026-11-17）
+
+仓库已公开，这一轮补的是「外人第一次点进来」需要的东西，不动场景与渲染逻辑。四件事：
+
+1. **许可**：新增根目录 `LICENSE`，代码按 **MIT**；同文件下半段单独声明 `public/data/` 与 `data/` 的地图/建筑数据派生自 OpenStreetMap（经 OpenFreeMap 与 Overpass），按 **ODbL-1.0** 授权、再分发须保留 ODbL 与署名。代码许可与数据许可分开写，避免把 ODbL 的传染性误套到源码上。README 加「许可」一节指向这两条。
+2. **在线演示**：新增 `.github/workflows/deploy.yml`，推 `main` 或手动触发即构建并发布到 GitHub Pages。构建命令带 `--base=/guangzhou-tower-3d/`，让 `import.meta.env.BASE_URL` 指到子路径；本地 `dev`/`build` 不带该参数仍是根路径，互不影响（所有数据 fetch 早已走 `BASE_URL`，故子路径部署无需改源码）。README 顶部加在线演示链接与「查询参数线上同样可用」一句。
+3. **仓库瘦身**：`docs/screenshots/` 清掉 **58 张**无任何引用的孤儿截图（231→173 张、215→167 MB）。删前逐张对过 `tests/`、`scripts/`、`src/`、`index.html` 与两份文档：其中 3 张（`canton-v11-plaza-day/night.png`、`engine-controls-375.png`）被浏览器测试与截图脚本按名引用，**保留**；其余 58 张确认零引用才删。
+4. **小修**：宣传片字幕底衬从 `linear-gradient(transparent, #080b0e70)` 改为 `linear-gradient(#080b0e55, #080b0e99)`，白昼幕的小字章节号不再发灰；`index.html` 补 og/twitter  meta（og:image 指向 raw.githubusercontent.com 上的首屏截图，因 `docs/` 不进 Vite 构建、站内相对路径在 Pages 上取不到）；20 个文件里 23 处指向 README 旧日志的注释改指 `DEVELOPMENT.md`（`scripts/shot-film-assets.mjs` 的 2 处真指 README——GIF 在 README 内嵌自动播放——保留不改）。
+
+**实测**：`npm test` **549/549**（31 册）；`npm run build -- --base=/guangzhou-tower-3d/` 产物 `dist/index.html` 的 js/css/chunk 全部带 `/guangzhou-tower-3d/` 前缀；`tests/film.browser.spec.js` **8/8**（2.8 分钟），含 1440×720 页脚不裁不压、移除地图取消影片与氛围 rAF 两条缺陷注入判据；字幕对比度在白昼幕截图目视可读。README 的测试数同步更正为 549 项 Node（31 册）、66 项浏览器（含宣传片 8 项）。
+
+**撤销**：删 `LICENSE`、`.github/workflows/deploy.yml` 与 README 的「许可」「在线演示」两段即回到无许可/无 Pages 状态；截图删除与注释改指各自 `git revert` 对应提交即可还原；字幕底衬改回 `transparent, #080b0e70` 一行即恢复旧对比度。Pages 本身在仓库 Settings→Pages 关掉即停止发布。
+
 ## README 拆开与瘦身（2026-10-16）
 
 README 原来把这一整段按日期倒序的记录挂在开头，第一行就是「景泰小学那一整块撤下（2026-10-16）」——外部读者看不出来这是什么。这一轮把记录整段搬进本文件，本文件里的相对路径与 README 同处仓库根目录，`docs/screenshots/…`、`docs/film/…` 照旧可直接打开。记录内容一字未改，只换了位置。

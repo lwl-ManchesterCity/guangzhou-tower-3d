@@ -5,7 +5,7 @@
 // 这一批才装灯，因为现实里小路口是停车让行而不是信号灯。
 //
 // 灯本身、停止线的位置与周期全是画的（OSM 不给），但**位置一个都不手摆**：进口道就是那条 way 自己的端点，
-// 方向就是它自己的切线。周期与放行间隔写成下面这些命名常量，README 与卡片按同一句口径点名示意。
+// 方向就是它自己的切线。周期与放行间隔写成下面这些命名常量，DEVELOPMENT.md 与卡片按同一句口径点名示意。
 import { CARRIAGEWAYS, LANE_OFFSET, RAMPS, insideRadius, scatter } from './traffic-life.js';
 import { plane } from './geo.js';
 
