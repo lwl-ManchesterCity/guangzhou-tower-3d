@@ -33,7 +33,7 @@
 - **三档氛围**——白昼／日落／夜景同步切换天空、江面、道路、建筑配色与塔身灯光，图例与面板跟着换色。是艺术化氛围，不是实时天气、真实日照或照明模拟。
 - **八站镜头导览**——广州塔 → 海心桥 → 花城广场 → 广州图书馆 → 广东省博物馆 → 广州西塔 → 广州东塔 → 猎德大桥，每站一句介绍、到站停 7 秒，可暂停、前后切站或退出。导览的是镜头，不提供步行路线。
 - **视角分享**——地址栏就是当前镜头与选中楼块的链接，复制即分享，打开后按当时的角度复现并重新打开那张卡片。镜头与选中要素各自独立校验：非法参数只忽略自己那部分，不夹紧、不丢弃整条链接。
-- **另一种引擎**——`?engine=three` 用 three.js 通过 MapLibre 的 CustomLayer 共享同一个 WebGL2 上下文与深度，读同一份数据，取景与手势读数对齐。
+- **另一种引擎**——`?engine=three` 用 three.js 通过 MapLibre 的 CustomLayer 共享同一个 WebGL2 上下文与深度，读同一份数据，取景与手势读数对齐；树、点击卡片、楼名检索与八站导览都已接入，夜景另走一层 bloom 泛光。透视镜与周边地点仍是现版（MapLibre）独占。
 
 **操作**：左键拖动只平移；旋转用 **⌥/Alt 加左键拖动**（横向 100 像素约 20°、纵向 100 像素约 25°），鼠标也可右键拖动或 ⌃/Ctrl 加左键拖动；滚轮缩放，手机双指。首屏「看全范围」切俯视总览（虚线圈＝半径 3 公里），「回到广州塔」回近景，「环绕」绕固定塔址旋转。系统开启「减少动态效果」时，过渡动画与自动播放自动取消。
 
@@ -54,7 +54,7 @@ npm run build     # 生产产物在 dist/
 npm run preview   # http://127.0.0.1:4173
 ```
 
-当前主包 **1,661.50 kB / gzip 447.29 kB**，样式 **114.32 kB / gzip 17.37 kB**，另有 **508.48 kB Worker**；Vite 的大包提醒没有隐藏。建筑快照 **1,660,823 字节 / gzip 275,979 字节**，检索索引 **124,017 字节 / gzip 20,161 字节**（首次打开搜索才下载），塔轮廓 **1,450 字节**。静态数据按需加载、不打进 JS 主包，部署服务器需自行开启压缩。
+当前 JS 分包（Vite code-split）：**maplibre 1,038.85 kB / gzip 280.06 kB**、**three 621.01 kB / gzip 155.39 kB**、helpers 94.73 kB、index 70.83 kB、boot 44.04 kB，另有 **508.48 kB Worker**；样式合计 **116.06 kB / gzip 18.38 kB**。建筑快照 **1,661,352 字节 / gzip 279,332 字节**，检索索引 **124,017 字节 / gzip 20,482 字节**（首次打开搜索才下载），塔轮廓 **1,534 字节**。静态数据按需加载、不打进 JS 主包，部署服务器需自行开启压缩。
 
 ## 数据与边界
 
@@ -93,13 +93,14 @@ npm test
 
 - `src/scenes.js` / `src/config.js`：唯一的地区身份（广州塔）、中心、半径、资源名、相机参数与视角限制；`src/atmosphere.js`：三档氛围的地图与塔身配色、灯光预设。
 - `src/map.js`：MapLibre 侧的编排——取数、建源建层、透视镜、导览/宣传片接线、命中与深链、手势、teardown 与对外 API；夜灯七层、昼夜氛围、动效循环、地标名牌、卡片挂点与纯函数各自成册在 `src/map/`（lamps / atmosphere / motion / plates / cards / helpers）。
+- `src/engine/`：three.js 那一侧——`boot.js` 装配、`scene.js` 编排与拾取/卡片/导览接线，`camera.js` / `gestures.js` / `projection.js` 相机与手势，`buildings.js` / `facades.js` / `landmarks.js` / `plaza.js` / `ground.js` / `river.js` 体块与地标，`bloom.js` 夜景泛光，`picking.js` / `cards.js` 命中与卡片。
 - `src/tower.js`：参数塔模型与共享 WebGL CustomLayer；`src/facade.js` / `src/water.js`：立面窗格、夜景灯窗与江面纹理的程序化生成（固定种子，只产图，不碰数据与图层）。
 - `src/buildings.js` / `scripts/prepare-buildings.mjs`：OSM 建筑归一化、标签白名单、塔轮廓提取、轮廓内部锚点、检索索引生成与快照转换。
 - `src/search.js` / `src/link.js`：文本归一化与分档排序、`#map=…&b=…` 视角链接的解析与格式化；`src/pois.js` / `src/geo.js`：Overpass 请求与缓存、球面距离与范围多边形。
 - `src/main.js` / `src/style.css` / `index.html`：界面结构、透视镜渲染与事件、氛围切换、导览控制条、检索面板、按需地点面板与安全文本卡片。
 - `src/film.js`：宣传片——六幕镜头、字幕与进度条、暂停／切幕／退出，以及「减少动态效果」下的降级。
-- `tests/*.test.js`：**556 项** Node 测试（32 册），覆盖地图/建筑/POI/氛围/透视镜/导览契约与快照、链接、贴图、近场装配等；每格新断言都配一条自己的源码变异，不以导入错误替代断言失败。
-- `tests/browser.spec.js` / `tests/engine.browser.spec.js` / `tests/film.browser.spec.js`：**66 项**真实浏览器验收（含宣传片 8 项），`npm run test:browser`（`--workers=1`，整套 29～39 分钟）。逐项读数、历史验收记录与全部截图清单见 [`DEVELOPMENT.md`](DEVELOPMENT.md)。
+- `tests/*.test.js`：**563 项** Node 测试（33 册），覆盖地图/建筑/POI/氛围/透视镜/导览契约与快照、链接、贴图、近场装配等；每格新断言都配一条自己的源码变异，不以导入错误替代断言失败。
+- `tests/browser.spec.js` / `tests/engine.browser.spec.js` / `tests/film.browser.spec.js`：**70 项**真实浏览器验收（含宣传片 8 项），`npm run test:browser`（`--workers=1`，整套 29～39 分钟）。逐项读数、历史验收记录与全部截图清单见 [`DEVELOPMENT.md`](DEVELOPMENT.md)。
 
 ## 许可
 
