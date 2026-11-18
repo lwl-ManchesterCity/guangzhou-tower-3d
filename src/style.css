@@ -171,6 +171,13 @@ body[data-search='open'] .scene-intro { display: none; }
 /* The new engine's own canvas: `#map` is positioned already, so this fills it the way MapLibre's does. */
 .engine-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .engine-stats { position: absolute; z-index: 4; left: 22px; bottom: 22px; border: 1px solid #bacdc1; border-radius: 6px; padding: 5px 9px; background: #f8fbfaf2; font: 10px/1.5 var(--mono); color: #46605c; white-space: nowrap; pointer-events: none; }
+/* #218 引擎侧的建筑卡与导览标记：外观借现版 popup 那一套（同一个圆角/内距/底色/投影），落点由
+   `src/engine/cards.js` 逐帧写 transform，所以这里只给盒子本身，不给定位。 */
+.engine-card-seat { position: absolute; left: 0; top: 0; z-index: 3; width: 250px; border-radius: 9px; padding: 18px 17px 15px; color: var(--ink); background: var(--card, #fff); box-shadow: 0 8px 32px #273f3922; }
+.engine-card-close { position: absolute; right: 4px; top: 3px; width: 28px; height: 28px; border: 0; background: none; font-size: 20px; line-height: 1; color: #8b988b; cursor: pointer; }
+body:not([data-atmosphere='day']) .engine-card-close { color: var(--muted); }
+.engine-tour-marker { position: absolute; left: 0; top: 0; z-index: 2; }
+@media (max-width: 760px) { .engine-card-seat { max-height: calc(50dvh - 40px); overflow-y: auto; overscroll-behavior: contain; } }
 .loading-dot { width: 10px; height: 10px; border: 2px solid #bacdc1; border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .map-error { max-width: 460px; line-height: 1.8; background: #fff6ed; color: #9b644b; }

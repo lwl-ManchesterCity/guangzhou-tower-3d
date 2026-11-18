@@ -6,12 +6,17 @@ import * as THREE from 'three';
 import { ATMOSPHERES } from '../atmosphere.js';
 import { DEFAULT_CENTER, SCENE, VIEW_LIMITS } from '../config.js';
 import { formatView, parseView } from '../link.js';
-import { viewportPadding } from '../padding.js';
+import { isLandscapeViewport, viewportPadding } from '../padding.js';
 import { LANDMARKS } from '../landmarks.js';
+import { TOWER_OSM_ID } from '../config.js';
+import { createTour, TOUR_STOPS } from '../tour.js';
+import { buildingId, geometryPoint } from '../map/helpers.js';
 import { createRig } from './camera.js';
 import { createGround } from './ground.js';
 import { createPlazaGround } from './plaza.js';
-import { createBuildingBuckets, drawnHeight, pickTallest } from './buildings.js';
+import { createBuildingBuckets, drawnHeight, pickTallest, ringOf } from './buildings.js';
+import { createHitBoxes, createPicking } from './picking.js';
+import { createEngineCards } from './cards.js';
 import {
   createFacadeSet, createLampMaterial, facadeOpacityFor, glowAtlasTexture, glowOpacityFor, lampAtlasTexture, lampCellOf,
   lampOpacityFor, setLampWeights,
@@ -20,6 +25,7 @@ import { createProjection } from './projection.js';
 import { createRiverSheen } from './river.js';
 import { createLandmarks, underShell } from './landmarks.js';
 import { LAMP_PERIODS_MS, lampWeight } from '../facade.js';
+import { TREE_MIN_ZOOM } from '../vegetation.js';
 import { createBloom } from './bloom.js';
 
 // 与现版同一个 120 ms 一拍：车流、行人与交叉淡都骑这一拍，两引擎的动效因此按同一个步长推进，
@@ -123,6 +129,7 @@ export function createFpsMeter({ every = 500, onSample } = {}) {
  * @param {{container: HTMLElement, canvas?: HTMLCanvasElement, mode?: string, data: {buildings?: object[], streets?: object[], water?: object[], greens?: object[], blocks?: object[]},
  *   nearField?: object, // 近场三组（车、人、船，`src/near-field.js` 造好交进来）
  *   bases?: object, // 楼根接地带（`src/shadow-pads.js`，与现版同一份）
+ *   greenery?: object, // 树（`src/vegetation.js`，与现版同一份装配，#218）
  *   testBuildings?: number, // 0 = 画全量；给一个 N 就只立最高的 N 栋 limits?: object, onFrame?: Function, writeHash?: boolean}} options
  */
 export function createEngineScene(options) {
@@ -197,6 +204,9 @@ export function createEngineScene(options) {
   // 楼根那一圈接地带与近场同一份模块、同一条镜头门控（现版那侧在 `tower.js` 的 render 里读同一个数）。
   const bases = options.bases ?? null;
   if (bases) scene.add(bases.group);
+  // 树（#218）：同一份 `createVegetation` 装配由 `boot.js` 交进来，这里只管挂进场景、交镜头门控与还资源。
+  const greenery = options.greenery ?? null;
+  if (greenery) scene.add(greenery.group);
   scene.add(ground.group, river.group, buildings.group);
   if (plaza) scene.add(plaza.group);
   if (landmarks) scene.add(landmarks.group);
@@ -275,7 +285,7 @@ export function createEngineScene(options) {
   applyPreset(ATMOSPHERES[atmosphereId] ?? ATMOSPHERES.day);
 
   const screenPoint = new THREE.Vector3();
-  const stored = writeHash ? parseView(globalThis.location?.hash).camera : null;
+  const storedLink = writeHash ? parseView(globalThis.location?.hash) : { camera: null, selection: null };
   // 开屏那一格：地址里的深链最优先，其次是接力留下的中继那一格（V4-8 的下半场），最后才是本场景的默认机位。
   const heroView = { center: SCENE.center, zoom: SCENE.camera.zoom, bearing: SCENE.camera.bearing, pitch: SCENE.camera.pitch };
   const rig = createRig({
@@ -285,7 +295,7 @@ export function createEngineScene(options) {
     // 取景留白与现版同一张表（`src/padding.js`）。这一侧的街区清单还是灰的（`main.js` 那句边界说明），
     // 所以 `panelOpen` 恒为 false；同一串 hash 因此在两边落在同一格画面上（#191，改之前差 140×70 px）。
     padding: () => viewportPadding(false),
-    initial: stored ?? heroView,
+    initial: storedLink.camera ?? heroView,
   });
 
   const screen = ({ lng, lat, altitude = 0 }) => {
@@ -294,6 +304,116 @@ export function createEngineScene(options) {
     return { x: (screenPoint.x * 0.5 + 0.5) * (canvas.clientWidth || 1), y: (-screenPoint.y * 0.5 + 0.5) * (canvas.clientHeight || 1), onScreen: screenPoint.z < 1 };
   };
   const labels = createLabels({ container, screen });
+
+  // ── #218：拾取、卡片、检索定位与导览。语义逐条对齐现版 `map.js`，差别只写在对应位置。 ──
+  const still = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
+  const towerHeight = 450;
+  // 卡片与深链读的那份快照：楼块＋桥＋塔。现版 `selectFeature` 只查楼块快照，壳体命中时回退到命中 feature 本身；
+  // 这一侧壳体与塔的命中盒本来就是从这批 feature 立的，所以查同一批就是"读同一条记录"。
+  const snapshot = [...(data.buildings ?? []), ...(data.bridge ?? []), ...(data.tower ?? [])];
+  let selection = null;
+  let focusToken = 0;
+  const cards = createEngineCards({ container, scene, screen, project, onClosed: () => { selection = null; } });
+  // 导览适配器：`createTour` 只吃 stop/once/off/flyTo 四件事（`src/tour.js`），这里把 rig 包成那副形状。
+  // 两个必须记住的陷阱：① rig 的飞行被输入打断时 promise 也 resolve（取消与到达同形），所以"到站"只认
+  // 登记在案的监听器；② visit() 先 map.stop() 再登记新监听器，旧飞行的 resolve 落在微任务里——发射时必须
+  // 只喊**还在册**的那几位，否则旧飞行会把新登记的到站回调提前喊掉（导览会在半路开始计时）。
+  const moveendWaiters = new Set();
+  const tourMap = {
+    stop: () => rig.cancelFlight(),
+    once: (event, fn) => { if (event === 'moveend') moveendWaiters.add(fn); },
+    off: (event, fn) => { moveendWaiters.delete(fn); },
+    flyTo: (camera) => {
+      const waiters = [...moveendWaiters];
+      rig.flyTo(camera, camera.duration ?? 0).then(() => {
+        for (const fn of waiters) if (moveendWaiters.delete(fn)) fn();
+      });
+    },
+  };
+  let tourMarker, tourStop;
+  const placeTourMarker = () => {
+    if (!tourMarker || !tourStop) return;
+    const point = screen({ lng: tourStop.center[0], lat: tourStop.center[1] });
+    tourMarker.style.visibility = point.onScreen ? '' : 'hidden';
+    // 与现版 Marker `anchor: 'top'`、offset [0, 12] 同一个挂法。
+    tourMarker.style.transform = `translate(-50%, 0) translate(${point.x}px, ${point.y + 12}px)`;
+  };
+  const tour = createTour(tourMap, {
+    // 相机公式逐字取自现版（`map.js` 的 tour.camera）：可用高度夹在顶栏与播放条之间，430 px 以上不补级。
+    // 差别一处：现版逐站交 padding，这一侧的留白折在投影里（#191）且恒为面板关闭档，所以 padding 不交。
+    camera(stop) {
+      const player = document.getElementById('tour-player').getBoundingClientRect();
+      const top = Math.max(...[...document.querySelector('.topbar').children].map((node) => node.getBoundingClientRect().bottom)) + 24;
+      const bottom = isLandscapeViewport() ? globalThis.innerHeight - 40 : player.top - 20;
+      const height = Math.max(100, bottom - top);
+      return { center: { lng: stop.center[0], lat: stop.center[1] }, bearing: stop.bearing, pitch: stop.pitch,
+        zoom: stop.zoom + Math.min(0, Math.log2(height / 430)), duration: still() ? 0 : 2200 };
+    },
+    onChange(state) {
+      options.onTourChange?.(state);
+      if (state.index < 0) { tourMarker?.remove(); tourMarker = undefined; tourStop = undefined; return; }
+      tourStop = TOUR_STOPS[state.index];
+      if (!tourMarker) {
+        tourMarker = document.createElement('div');
+        tourMarker.className = 'tour-marker engine-tour-marker';
+        tourMarker.setAttribute('aria-hidden', 'true');
+        container.append(tourMarker);
+      }
+      tourMarker.textContent = `${String(state.index + 1).padStart(2, '0')} · ${tourStop.name}`;
+      placeTourMarker();
+    },
+  });
+  // 与现版 `manualInteraction` 同一件事：用户一碰镜头，导览让位、检索定位作废。
+  const manualInteraction = () => { focusToken++; tour.exit(); options.onInteraction?.(); };
+  canvas.addEventListener('pointerdown', manualInteraction);
+  canvas.addEventListener('wheel', manualInteraction, { passive: true });
+  const interrupt = () => { manualInteraction(); cards.close(); };
+  // 开卡统一入口（现版 `selectFeature` 的对应物）：点击、检索定位与深链都走这里，卡片、高亮与地址栏因此同源。
+  function selectFeature(feature) {
+    const record = snapshot.find((item) => String(item.properties.osmId) === String(feature.properties.osmId)) ?? feature;
+    const { properties, geometry } = record;
+    const ring = ringOf({ geometry });
+    const points = ring.map(([lng, lat]) => screen({ lng, lat }));
+    const near = points.reduce((a, b) => (b.y > a.y ? b : a));
+    options.onBuildingClick?.({
+      properties,
+      outline: { type: 'Feature', properties: { height: properties.tower ? towerHeight : properties.displayHeight ?? properties.height, base: properties.base }, geometry },
+      lngLat: ring[points.indexOf(near)],
+    });
+    const [lng, lat] = geometryPoint(geometry);
+    selection = { osmId: buildingId(properties.osmId), lat, lng };
+  }
+  const hitFeatures = [...(landmarks?.forms.forms ?? []).filter((form) => form.hit).map((form) => form.feature), ...(data.tower ?? [])];
+  const picking = createPicking({
+    canvas, camera: rig.camera,
+    walls: buildings.group.children.filter((mesh) => mesh.userData.features),
+    boxes: createHitBoxes({ features: hitFeatures, project, towerHeight }),
+    onPick: selectFeature,
+  });
+  // 检索定位（现版 `focusBuilding`）：飞到楼块自己的点上、不低于 15.4 级，停稳后开卡。现版要等瓦片加载所以
+  // 重试 24 次；这一侧快照就在手里，飞行 promise 落定即选。取消与到达同形（rig 的 stopFlight 也 resolve），
+  // 所以用令牌区分：pointerdown/wheel 把令牌推进，落定的那一段就不再开卡。
+  function focusBuilding({ osmId, lng, lat }) {
+    const token = ++focusToken;
+    tour.exit();
+    options.onInteraction?.();
+    const view = rig.view();
+    rig.flyTo({ ...view, center: { lng, lat }, zoom: Math.max(view.zoom, 15.4) }, still() ? 0 : 800).then(() => {
+      if (token !== focusToken) return;
+      const feature = snapshot.find((item) => String(item.properties.osmId) === String(osmId));
+      if (feature) selectFeature(feature);
+    });
+  }
+  // 深链里那一栋：现版等瓦片就绪再拾取，这一侧快照即取即开。setTimeout 是刻意的——main.js 要在 boot 的
+  // promise 落定后才把 neighborhood 接上，开卡回调（showBuilding）在那之前喊出去会扑空。
+  if (storedLink.selection) {
+    const { osmId } = storedLink.selection;
+    setTimeout(() => {
+      const feature = snapshot.find((item) => String(item.properties.osmId) === String(osmId));
+      if (feature) selectFeature(feature);
+    }, 0);
+  }
+
   const stats = createFpsMeter();
   const panel = document.createElement('div');
   panel.className = 'engine-stats';
@@ -346,6 +466,8 @@ export function createEngineScene(options) {
     lastWidth = width;
     lastHeight = height;
     bloom?.setSize(width, height);
+    // 卡片尺寸随断点变（窄屏那套 padding/max-height），换布局要重量一次，否则席位按旧盒子算。
+    cards.measure();
   };
   resize();
   globalThis.addEventListener('resize', resize);
@@ -372,6 +494,8 @@ export function createEngineScene(options) {
     }
     // 接地带的门控读的也是这一帧的镜头：与现版那侧同一条理由（载入那帧与跑过又停下那帧必须是一张画）。
     bases?.setZoom(view.zoom);
+    // 树与接地带同一条门控（14.5 级）：现版那侧在 `tower.js` 的 render 里每帧交同一个数。
+    greenery?.setZoom(view.zoom);
     // 广场那张乘性贴图读的也是这一帧：它与接地带同一条理由——载入那帧与跑过又停下那帧必须给同一个答案。
     plaza?.setZoom(view.zoom);
     // 波光的透明度读 zoom，格子读转角、设备倍率与画布中心——斜坡那一格内部按 1/20 级归档，镜头停住就不必再写。
@@ -399,13 +523,15 @@ export function createEngineScene(options) {
     if (nightNow()) ensureBloom().render();
     else renderer.render(scene, rig.camera);
     labels.place();
+    cards.place();
+    placeTourMarker();
     const sample = stats.tick(time);
     if (sample) {
       samples = sample;
       const features = ground.report.features;
       const greens = (features.park ?? 0) + (features.grass ?? 0) + (features.wood ?? 0);
       panel.textContent = `V8 Phase 2 · three ${samples.fps} fps · 最长帧 ${samples.ms} ms · ${buildings.count} 栋 / 窗纹 ${buildings.grids} 层 / `
-        + `灯火 ${buildings.lamps + buildings.glows} 层 / 波光 ${river.mesh ? 1 : 0} 层 / 壳体 ${landmarks?.report().shells ?? 0} 片 / 广场 ${plaza?.report().plates ?? 0} 层 / 江上 ${nearField?.counts.boats ?? 0} 船 / 地面 ${ground.group.children.length} 块：`
+        + `灯火 ${buildings.lamps + buildings.glows} 层 / 波光 ${river.mesh ? 1 : 0} 层 / 壳体 ${landmarks?.report().shells ?? 0} 片 / 广场 ${plaza?.report().plates ?? 0} 层 / 江上 ${nearField?.counts.boats ?? 0} 船 / 树 ${greenery?.report.trees ?? 0} 株 / 地面 ${ground.group.children.length} 块：`
         + `水 ${features.water ?? 0}·绿 ${greens}·地块 ${features.block ?? 0}·铺装 ${features.pavement ?? 0}·路 ${features.road ?? 0}`;
     }
     // The hash is the shared language between the two engines, but writing it on every frame would push a new entry
@@ -414,7 +540,7 @@ export function createEngineScene(options) {
       lastHash = time;
       globalThis.history?.replaceState(null, '', formatView({
         zoom: view.zoom, center: view.center, bearing: view.bearing, pitch: view.pitch,
-      }));
+      }, selection));
     }
     onFrame?.(view, sample);
   };
@@ -490,9 +616,33 @@ export function createEngineScene(options) {
       return lampWeights();
     },
     nearTraffic: () => nearTraffic(),
+    /** 与现版 `nearTrees()` 同名同形状（`map.js` 那句展开 report 再加 visible/minZoom/zoom）。 */
+    nearTrees: () => (greenery
+      ? { ...greenery.report, visible: greenery.group.visible, minZoom: TREE_MIN_ZOOM, zoom: rig.view().zoom } : null),
+    // ── #218 的交互面：与现版返回对象同名，main.js 不必学第二套词汇。 ──
+    showBuilding(building, content) {
+      manualInteraction();
+      cards.open(building, content);
+    },
+    focusBuilding,
+    hasCard: cards.hasCard,
+    closeCard: cards.close,
+    cardState: cards.cardState,
+    buildingSelection: () => selection,
+    tour,
+    startTour() { focusToken++; cards.close(); tour.start(!still()); },
+    interrupt,
+    // 透视镜在这一侧还没接（界面灰着），但卡片的事实行要读 lens.mode——给一个恒定的出厂档，与现版开屏那一格同值。
+    get lens() { return { mode: 'use', category: 'all', source: 'all' }; },
     dispose: () => {
       renderer.setAnimationLoop(null);
       globalThis.removeEventListener('resize', resize);
+      canvas.removeEventListener('pointerdown', manualInteraction);
+      canvas.removeEventListener('wheel', manualInteraction);
+      tour.exit();
+      tourMarker?.remove();
+      picking.dispose();
+      cards.dispose();
       rig.dispose();
       ground.dispose();
       buildings.dispose();
@@ -506,6 +656,8 @@ export function createEngineScene(options) {
       // 以前这里只收了自己那五块，换一次场景就把车、人、船、湿线与灯的三层留在显存里（#177）。
       nearField?.dispose();
       bases?.dispose?.();
+      // 树与它们那片接地影同属这一位客人：七具网格、四份材质与影那张贴图都在 `createVegetation.dispose` 手里。
+      greenery?.dispose();
       river.dispose();
       // 广场那三块板、那张乘性网格与它背后那张贴图都是这一层造的（`engine/plaza.js`），所以也这一层还——
       // 与 `river` 那一层同一个口径：谁造的谁还。

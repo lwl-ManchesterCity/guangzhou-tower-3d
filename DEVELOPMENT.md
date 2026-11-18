@@ -39,6 +39,25 @@ A3 那节留下的账：灯格家族 162→324 张之后，场景总图 608 张�
 
 **撤销**：`git revert` 这一笔即回到单文件 map.js；六册与 helpers 测试册随提交整体进出，无数据与样式改动。
 
+### ③ 新引擎补齐树/拾取/卡片/检索/导览（#218，2026-11-18）
+
+`?engine=three` 那侧此前只有地面、楼桶、窗纹、灯火、车流、地标壳体与江面波光，**树、点击拾取、卡片、检索、导览五整块能力都缺**（界面灰着并点名缺哪几块）。这一笔把五块接齐，引擎侧从此与现版功能对等，灰控件清单只剩透视镜与场景快捷键。改动全在 `src/engine/`（新增 `cards.js`／`picking.js`）＋`boot.js` 装配＋`main.js` 引擎分支接线＋`style.css` 卡片席位，现版那侧逐字节未动。
+
+- **树**：`boot.js` 直接调现版 `createVegetation`，入参与 map.js 那处逐字同款（七份快照全齐、`avoid = stoneRings(carvePlaza)`、同米制原点），自带 `setZoom` 门控／`report`／`dispose`。两侧株数 **2,380** 逐字一致、三种剪影分档（`bySpecies`）相等、门槛同是 14.5 级（开屏 15.5 画着、13.5 收掉）。
+- **拾取**：`mergeSolids` 顶面全在前、侧壁全在后，但逐栋跨度此前没暴露——在并桶前记下每栋 caps/sides 段，`faceIndex*3` 落回哪栋是纯函数（Node 可钉）；壳体按"最近有名祖先"认 osmId（台账里 `184738716`／`1313608038:rib` 那些名字就是挂点），塔身认 `tower-model`。新增 `tests/picking.test.js` **7 项**，Node 总数 **556→563**。
+- **卡片**：现版 cards.js 的挂点评分依赖 `queryRenderedFeatures`（引擎没有），改成 DOM 卡＋`screen()` 每帧定位＋半透明选中体块（`#1f4e5f`/0.35 同色）；`link.js` 的 `&b=` 解析/写回接上，深链可重开。
+- **检索＋导览**：main.js 的 UI 原样复用，只差 `focusBuilding`（flyTo zoom≥15.4、800 ms、Promise 落定开卡，pointerdown/wheel 取消）与 `showBuilding`；导览给 rig 包适配器（flyTo 落定＝moveend），镜头公式 `stop.zoom + min(0, log2(height/430))` 照抄，八站逐站中心/层级/朝向漂移 **0.00**。
+
+**一处真 src 缺陷（本轮修，不是判据问题）**：`ringOf(feature)`（`engine/buildings.js`）读的是 `feature.geometry.type`，而 `selectFeature` 与 cards 的两处调用原来直接把**裸 geometry** 传进去 → `Cannot read properties of undefined (reading 'type')`，卡片永远开不了。三处调用点（`scene.js:375`、`cards.js:42`／`:56`）改成传 `{ geometry }`。注入反证：把 `scene.js:375` 还原成 `ringOf(geometry)` → 卡片项当场红。
+
+**判据同批改**：灰控件清单与"还缺检索/导览"两行、手势提示（补回"点击楼块查看"）、启用控件数、**teardown 台账精确数 59/62/29 → 66/66/30＝162 样**（树进来涨 7 几何＋4 材质＋影贴图；选中体块懒建，开卡前不进台账）。新增四项浏览器交互判据（树平价／卡片／检索／导览），**每项都注入验红**：树＝`boot.js` 传 `greenery:null` → 红；卡片＝上面那处 ringOf 还原 → 红；导览=`scene.js:349` 给 `bearing+10` → 落定判据永不满足而红；检索＝把 `focusBuilding` 的 `token !== focusToken` 守卫反成 `===` → 卡片永不打开而红；四处各自原样还原即绿。
+
+**一条会再踩的 Playwright 坑（本轮实测换来）**：这个版本的 `page.waitForFunction` **不会 await 异步谓词**——返回的 Promise 被当真值，`waitForFunction(async () => false)` 实测 18 ms 就"通过"。导览落定判据第一版用异步谓词读 `neighborhood.view()`，于是在飞行还没起步时就假判"到站"（开屏中心离第一站只有 55 m）。修法：先用一次 `page.evaluate` 把 neighborhood 缓存到 `window.__tourEngine`，落定谓词改**同步**并同时量中心＋层级＋朝向三件（开屏 15.5 ≠ 第一站 15.4，逼着飞行真跑完）。`page.evaluate(async …)` 本身是会 await 的，安全。另：导览到站只认**活相机** `neighborhood.view()`，不认 hash（半秒一拍的节流序列化会滞后）也不认 travelling 旗标（moveend 微任务竞态）。
+
+**实测**：Node **563/563** 首遍；四项新交互判据定向 **4/4**（33.6 s）。全套 **70 项**浏览器安全网：**第一遍 68 过／1 红／1 skip（33.0 分钟，机器被压着）**，唯一红是现版那侧的氛围走路项（`browser.spec.js:1303`）——拍照耗时守卫量到 **0.68 s 对门槛 0.66 s**（超 0.02），是负载偶发不是本次回归（#218 改动全在引擎侧，没碰氛围走路）；**单独复跑即绿（3.2 分钟），未改任何代码、未放宽断言** ⇒ 等价 69 过／0 红／1 skip（那 1 skip 是既有数据缺口）。`npm run build` 绿（**365 ms**，8 个 asset chunk＋index.html；`helpers.js` 94.73 kB 是 #219 拆分带来的新 chunk，分包结构沿用）。
+
+**撤销**：`git revert` 这一笔即回到引擎缺五块能力的状态；`cards.js`／`picking.js`／`tests/picking.test.js` 随提交整体进出，`boot.js` 的 `createVegetation` 装配、`main.js` 引擎分支接线与 `style.css` 卡片席位一并退；现版那侧与数据全程未改。
+
 ## 开源配套：许可、在线演示与仓库瘦身（2026-11-17）
 
 仓库已公开，这一轮补的是「外人第一次点进来」需要的东西，不动场景与渲染逻辑。四件事：

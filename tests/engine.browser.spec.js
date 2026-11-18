@@ -87,6 +87,8 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
   for (const roster of ['水 41', '绿 379', '地块 572', '铺装 23', '路 2972']) {
     expect(scene.panel, `面板里没有 ${roster}：${scene.panel}`).toContain(roster);
   }
+  // #218：树与现版同一份装配（同路网、同绿地面、同避让环），株数必须与现版那侧一致（2026-11-18 两侧同测 2,380）。
+  expect(scene.panel, `面板里没有树的株数：${scene.panel}`).toContain('树 2380 株');
   // Phase 0 那侧只有三个氛围按钮答得出话；项 5 把车流、行人与交叉淡接进引擎之后，动效开关也有东西可答了，
   // 所以这一格从三变四。别的控件仍然灰着（业务功能按文档要到 Phase 4 才回迁）。
   expect(scene.atmosphere, 'the skeleton serves three atmosphere modes plus the motion switch, nothing else').toBe(4);
@@ -124,6 +126,9 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
     // 地标那一层先按名字找出来存好：下面量塔脚那片基底时要把它摘掉（找不到就当场报，别让它静默地不摘）。
     neighborhood.scene.traverse((object) => { if (object.name === 'landmarks') window.__landmarks = object; });
     if (!window.__landmarks) throw new Error('地标那一层没挂在引擎的场景上：塔脚那一格摘不出来');
+    // 树同理（#218）：广场那格量的是地面刷没刷绿，树冠是压在它上面的新写入者，量之前摘掉。
+    neighborhood.scene.traverse((object) => { if (object.name === 'vegetation') window.__vegetation = object; });
+    if (!window.__vegetation) throw new Error('树那一层没挂在引擎的场景上：广场那一格摘不出来');
     return {
       channel: neighborhood.screen({ lng: 113.319130, lat: 23.111893, altitude: 0.2 }),
       square: neighborhood.screen({ lng: 113.31921, lat: 23.116, altitude: 0.13 }),
@@ -148,7 +153,11 @@ test('the three.js engine mounts behind the switch, draws the ground and all 3,9
     }, { source: (await page.screenshot({ clip: box })).toString('base64') });
   };
   const channel = await rgbAt(spots.channel, '江心');
+  // 树冠是 #218 进来的新写入者，会把这一格的红减蓝从 12 压到 10（实测）：这一格说的是"地面刷了绿地色"，
+  // 所以与塔脚摘地标同一个办法——摘掉再量，门槛一字不动。
+  await page.evaluate(() => { window.__vegetation.visible = false; });
   const square = await rgbAt(spots.square, '花城广场');
+  await page.evaluate(() => { window.__vegetation.visible = true; });
   // 塔脚那一点上现在站着塔自己的底座（`createTowerModel` 那圈半径 42~46 m 的 `pale`，实测把那一格压到
   // 163,175,171），所以量地面之前先把地标那一层摘掉：这一格说的是"地面那层把塔脚那片基底画成 background 色"，
   // 不是"塔脚那一点看上去一定是 background 色"。摘掉再量，量的还是原来那一格。
@@ -1016,16 +1025,19 @@ test('the new engine says what it cannot do, and still has a zoom button', async
     })),
     note: document.querySelector('.engine-note')?.textContent ?? '',
     hint: document.getElementById('gesture-hint').textContent.replace(/\s+/g, ' '),
-    greyed: [...document.querySelectorAll('#view-controls button[disabled], #places-toggle, #search-toggle, #tour-start, .scene-key button')]
+    // #218 之后检索与导览在这一侧答得出话了，所以只数**真灰着**的控件。
+    greyed: [...document.querySelectorAll('#view-controls button[disabled], #places-toggle[disabled], #film-start[disabled], #explore-button[disabled], #orbit-button[disabled], .scene-key button[disabled]')]
       .map((button) => ({ id: button.id || button.className, title: button.title })),
+    live: [...document.querySelectorAll('#search-toggle, #tour-start')].map((button) => !button.disabled),
   }));
   expect(ui.zoomers.map((button) => button.label), '缩放按钮没补齐或标签不对').toEqual(['放大一级', '缩小一级']);
   expect(ui.zoomers.every((button) => !button.disabled), '缩放按钮在引擎这一侧还是灰的').toBe(true);
+  expect(ui.live, '检索与导览已经接进这一侧了，这两颗按钮不该再灰着').toEqual([true, true]);
   expect(ui.greyed.length, `该灰着的控件数变了：${JSON.stringify(ui.greyed.map((row) => row.id))}`).toBeGreaterThanOrEqual(5);
   const mute = ui.greyed.filter((row) => !row.title);
   expect(mute, `这些控件灰着但页面不给理由：${JSON.stringify(mute)}`).toEqual([]);
-  // 手势那一行不许承诺这一侧做不到的事（"点击楼块查看"在新引擎里是不成立的）。
-  expect(ui.hint, `手势提示还在说这一侧做不到的事：${ui.hint}`).not.toContain('点击楼块');
+  // #218：点击楼块在这一侧成立了，手势那一行必须把这件事说出来。
+  expect(ui.hint, `手势提示没说点击楼块这件事：${ui.hint}`).toContain('点击楼块');
   // 边界那一行不许说谎：已经进这一侧的东西不能被写成"还缺"，还缺的整块能力必须点名。
   // （注入办法：把 `main.js` 那行改回"塔身、桥……还没过来"，第一格当场红——这一格量的就是"迁完了有没有把话改过来"。）
   expect(ui.note, '边界那一行没有"已接／还缺"这两段：').toMatch(/已接.*还缺/);
@@ -1033,8 +1045,10 @@ test('the new engine says what it cannot do, and still has a zoom button', async
   expect(missing, `壳体与桥已经进这一侧了，边界那行还把它们算成缺的：${missing}`).not.toMatch(/壳体|塔身|桥/);
   // #192-A：广场那四层地面（含米数铺装贴花）已经在这侧画出来了，"还缺"里再写它就是说谎。
   expect(missing, `广场地面已经进这一侧了，边界那行还把它算成缺的：${missing}`).not.toMatch(/广场/);
-  expect(missing, `边界那一行没点名还缺检索：${missing}`).toMatch(/检索/);
-  expect(missing, `边界那一行没点名还缺导览：${missing}`).toMatch(/导览/);
+  // #218：树、卡片、检索与导览都进来了，"还缺"里再写它们任何一个是说谎。
+  expect(missing, `检索与导览已经进这一侧了，边界那行还把它们算成缺的：${missing}`).not.toMatch(/检索|导览/);
+  expect(missing, `树与点击卡片已经进这一侧了，边界那行还把它们算成缺的：${missing}`).not.toMatch(/树|卡片/);
+  expect(missing, `边界那一行没点名还缺的三整块（地点清单/透视镜/宣传片）：${missing}`).toMatch(/地点清单.*透视镜.*宣传片/);
   // 一次点击 = 一级，并且受限幅夹住（夹在相机里，不在按钮上）。
   const zoomOf = () => page.evaluate(() => Number(location.hash.split('/')[0].replace('#map=', '')));
   const start = await zoomOf();
@@ -1077,8 +1091,9 @@ test('the new engine gives back every geometry, material and texture it made', a
   const live = await page.evaluate(() => window.__probe.n.nearTraffic());
   expect([live.cars, live.walkers, live.boats], `近场没装配，这条判据量的是空场景：${JSON.stringify(live)}`)
     .toEqual([1298, 1244, 18]);
-  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（59 几何 + 62 材质 + 29 贴图 = 150 样，
-  // 2026-10-16 实测：广场那一层进来之前是 55/58/28 = 141 样，地标那一层进来之前是 29/31/11 = 71 样）。
+  // 台账按"最近的有名祖先"归类，所以报红时直接点名漏的是哪一组（66 几何 + 66 材质 + 30 贴图 = 162 样，
+  // 2026-11-18 #218 树进来之后实测；树进来之前是 59/62/29 = 150 样，广场那一层进来之前是 55/58/28 = 141 样）。
+  // 选中体块是懒建的：这一页没开过卡，所以台账里没有它——开卡那一页的多出份由卡片那一项自己钉。
   const census = await page.evaluate(() => {
     const rows = [];
     const seen = new Set();
@@ -1108,13 +1123,13 @@ test('the new engine gives back every geometry, material and texture it made', a
     const named = {};
     window.__probe.n.scene.traverse((object) => { if (object.name && object.isObject3D && !named[object.name]) named[object.name] = object; });
     window.__groups = Object.fromEntries(['traffic-life', 'water-life', 'shore-wet', 'building-bases-group', 'river-sheen',
-      'landmarks', 'plaza-ground'].map((name) => [name, named[name] ?? null]));
+      'landmarks', 'plaza-ground', 'vegetation'].map((name) => [name, named[name] ?? null]));
     return { total: rows.length, byKind: rows.reduce((a, r) => { a[r.kind] = (a[r.kind] ?? 0) + 1; return a; }, {}),
       owners: [...new Set(rows.map((r) => r.owner))].sort(),
       missingGroups: Object.entries(window.__groups).filter(([, node]) => !node).map(([name]) => name) };
   });
   expect(census.byKind, `三样一样都不能缺（几何/材质/贴图）：${JSON.stringify(census.byKind)}`)
-    .toEqual({ geometry: 59, material: 62, texture: 29 });
+    .toEqual({ geometry: 66, material: 66, texture: 30 });
   expect(census.missingGroups, `这些组没挂进引擎的场景，"摘干净"那一半就量不到：${JSON.stringify(census.missingGroups)}`)
     .toEqual([]);
   // 漏了 #177 的那几组名字必须出现在台账里，否则这条判据量到的可能只是引擎自己那五块。
@@ -1133,6 +1148,12 @@ test('the new engine gives back every geometry, material and texture it made', a
   // 少一块就是有人搬了画面没搬 teardown（台账总数从 141 样涨到 150 样，多出来的九样就是这些名字与那张图）。
   for (const group of ['plaza-lawn', 'plaza-stone', 'plaza-walk', 'canton-plaza-surface']) {
     expect(census.owners, `台账里没有 ${group}，广场那一层没整块挂进场景`).toContain(group);
+  }
+  // 树那一层同理（#218）：三种剪影各自的干与冠、加上那片接地影，七具网格都要在台账里点名——
+  // 少一具就是有人搬了画面没搬 teardown（台账总数从 150 样涨到 162 样，多出来的十二样就是这些名字与影那张贴图）。
+  for (const group of ['vegetation-banyan-trunks', 'vegetation-banyan-crowns', 'vegetation-camphor-trunks',
+    'vegetation-camphor-crowns', 'vegetation-palm-trunks', 'vegetation-palm-crowns', 'vegetation-pads']) {
+    expect(census.owners, `台账里没有 ${group}，树那一层没整块挂进场景`).toContain(group);
   }
   const after = await page.evaluate(() => {
     window.__probe.n.dispose();
@@ -1155,7 +1176,7 @@ test('the new engine gives back every geometry, material and texture it made', a
   // 还了资源不等于摘了节点：`group.clear()` 那一半单独钉，与 Node 侧那条 `[0, 0, 0]` 同一个口径。
   expect(after.left, `dispose 之后这些组里还留着节点：${JSON.stringify(after.left)}`)
     .toEqual({ 'traffic-life': 0, 'water-life': 0, 'shore-wet': 0, 'building-bases-group': 0, 'river-sheen': 0,
-      landmarks: 0, 'plaza-ground': 0 });
+      landmarks: 0, 'plaza-ground': 0, vegetation: 0 });
   expect(after.panel, 'dispose 之后读数面板还留在页面上').toBe(false);
   // 贴图归造它的那一方还（`boot.js` 那颗光晕、`scene.js` 那两张图集），这里只要求"有人还了"。
   expect(errors, `拆场景的过程中报了错：${JSON.stringify(errors)}`).toEqual([]);
@@ -1922,4 +1943,202 @@ test('the new engine stands the deck’s walkers on the surface it actually drew
   // ④ 这一页确实有近场与桥：没有的话上面三条全在空数组上永真。
   expect([read.near.cars, read.near.walkers], `近场没装配：${JSON.stringify(read.near)}`).toEqual([1298, 1244]);
   expect(errors, `桥面标高这一块跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+// ── #218：树、点击卡片、检索与导览进新引擎。四条判据各自量一条完整的链路，注入验红见 DEVELOPMENT.md 那一轮。 ──
+
+test('the new engine plants the same trees as the shipped map, behind the same zoom gate', async ({ page }) => {
+  test.setTimeout(300000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const readTrees = () => page.evaluate(async () => {
+    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    return neighborhood.nearTrees();
+  });
+  // 现版那侧先量一份：树是同一份装配（同路网、同绿地面、同避让环），株数与分档必须逐字一致。
+  await openEngine(page, 'legacy');
+  const legacy = await readTrees();
+  expect(legacy, '现版那侧没有树，这条判据量的是空场景').not.toBeNull();
+  expect(legacy.trees, `现版树数变了：${legacy.trees}`).toBe(2380);
+  await openEngine(page, 'three');
+  const engine = await readTrees();
+  expect(engine, '引擎这一侧没接树').not.toBeNull();
+  for (const key of ['trees', 'roadside', 'canopy', 'radius', 'minZoom']) {
+    expect(engine[key], `树的 ${key} 两边不一致：引擎 ${engine[key]} vs 现版 ${legacy[key]}`).toEqual(legacy[key]);
+  }
+  expect(engine.byKind, '公园树冠按类分的数两边不一致').toEqual(legacy.byKind);
+  expect(engine.bySpecies, '三种剪影各自的株数两边不一致').toEqual(legacy.bySpecies);
+  expect(engine.visible, `开屏 15.5 级树应当画着：${JSON.stringify(engine)}`).toBe(true);
+  expect(engine.minZoom, '树的镜头门槛与现版不是同一个数').toBe(14.5);
+  // 门槛真的在挡：拉到 13.5 级整组收掉，拉回来再画。死区 0.02 级，所以两档都离门槛远着。
+  const zoomTo = async (zoom) => {
+    await page.evaluate(async (next) => {
+      const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+      neighborhood.setView({ ...neighborhood.view(), zoom: next });
+    }, zoom);
+    await page.waitForTimeout(900);
+    return readTrees();
+  };
+  expect((await zoomTo(13.5)).visible, '13.5 级上树没收掉').toBe(false);
+  expect((await zoomTo(15.5)).visible, '拉回 15.5 级树没回来').toBe(true);
+  expect(errors, `树这一块跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+test('the new engine opens a card where the click lands, writes it into the link, and takes it back on Esc', async ({ page }) => {
+  test.setTimeout(240000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await openEngine(page, 'three');
+  const probe = () => page.evaluate(async () => {
+    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    let volume = null;
+    neighborhood.scene.traverse((object) => { if (object.name === 'building-selection') volume = object; });
+    const seat = document.querySelector('.engine-card-seat');
+    return { card: document.body.dataset.card, state: neighborhood.cardState(), selection: neighborhood.buildingSelection(),
+      seats: document.querySelectorAll('.engine-card-seat').length,
+      seatBox: seat ? seat.getBoundingClientRect().toJSON() : null,
+      volume: volume ? { color: volume.material.color.getHexString(), opacity: volume.material.opacity,
+        renderOrder: volume.renderOrder, depthWrite: volume.material.depthWrite } : null,
+      hash: location.hash };
+  });
+  // 西塔壳体那一点：450 m 级的命中盒罩着整个轮廓，420 m 高处的投影点必在盒里，点击因此是确定性的。
+  const aim = await page.evaluate(async () => {
+    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    const point = neighborhood.screen({ lng: 113.317861, lat: 23.120317, altitude: 420 });
+    const snapshot = await (await fetch('/data/canton-buildings.geojson')).json();
+    const tower = snapshot.features.find((feature) => String(feature.properties.osmId) === '184738716');
+    const ring = tower.geometry.type === 'Polygon' ? tower.geometry.coordinates[0] : tower.geometry.coordinates[0][0];
+    const points = ring.map(([lng, lat]) => neighborhood.screen({ lng, lat }));
+    return { point, box: { left: Math.min(...points.map((p) => p.x)), right: Math.max(...points.map((p) => p.x)) } };
+  });
+  expect(aim.point.onScreen, '西塔那一点不在开屏画面里').toBe(true);
+  await page.mouse.click(aim.point.x, aim.point.y);
+  await page.waitForFunction(() => document.body.dataset.card === 'open', { timeout: 5000 });
+  const opened = await probe();
+  expect(opened.seats, '一张卡就该只有一张席位').toBe(1);
+  expect(opened.state?.osmId, `点西塔开出来的不是西塔：${JSON.stringify(opened.state)}`).toBe(184738716);
+  expect(opened.state.volume, '选中体块没立起来').toBe(true);
+  expect(opened.state.height, `选中体块的高度不是西塔自己的数：${opened.state.height}`).toBeGreaterThan(400);
+  // 与现版同一口径：`buildingId` 把纯数字 id 归成 Number（src/map/helpers.js），两侧 selection.osmId 都是数。
+  expect(opened.selection?.osmId, '深链那一份选中没记下').toBe(184738716);
+  // 高亮与现版 `building-selection` 那层同一个颜色与透明度，排在灯火之后、不写深度。
+  expect(opened.volume, '场景里没有 building-selection 那一层').not.toBeNull();
+  expect([opened.volume.color, opened.volume.opacity, opened.volume.renderOrder, opened.volume.depthWrite])
+    .toEqual(['1f4e5f', 0.35, 4, false]);
+  // 席位站在轮廓更宽的那一侧：不压住本楼（卡片的水平范围与轮廓的水平范围不相交）。
+  expect(opened.seatBox.right <= aim.box.left || opened.seatBox.left >= aim.box.right,
+    `卡片压住了本楼：卡 ${JSON.stringify(opened.seatBox)} vs 轮廓 ${JSON.stringify(aim.box)}`).toBe(true);
+  await expect(page.locator('.engine-card-seat')).toContainText('广州西塔');
+  // 地址栏那一份：hash 的拍是半秒，等它写上去。
+  await page.waitForFunction(() => location.hash.includes('&b=184738716'), { timeout: 4000 });
+  const linked = await page.evaluate(() => location.hash);
+  // Esc 收卡：席位、体块、深链三样一起收。
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.body.dataset.card === 'closed', { timeout: 3000 });
+  await page.waitForFunction(() => !location.hash.includes('&b='), { timeout: 4000 });
+  const closed = await probe();
+  expect([closed.seats, closed.state, closed.selection, closed.volume], 'Esc 没收干净').toEqual([0, null, null, null]);
+  // 深链重开：同一串 hash 进新页，卡片自己回来，还是那一栋。
+  await openEngine(page, 'three', linked);
+  await page.waitForFunction(() => document.body.dataset.card === 'open', { timeout: 8000 });
+  const reopened = await probe();
+  expect(reopened.state?.osmId, `深链重开的不是原来那一栋：${JSON.stringify(reopened.state)}`).toBe(184738716);
+  // 关闭按钮与 Esc 同一条路。
+  await page.locator('.engine-card-close').click();
+  await page.waitForFunction(() => document.body.dataset.card === 'closed', { timeout: 3000 });
+  expect((await probe()).seats, '关闭按钮没收掉席位').toBe(0);
+  expect(errors, `卡片这一块跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+test('the new engine answers a search by flying to the block and opening its card', async ({ page }) => {
+  test.setTimeout(240000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await openEngine(page, 'three');
+  await page.locator('#search-toggle').click();
+  await page.fill('#search-input', '广州图书馆');
+  await page.waitForSelector('.search-option', { timeout: 30000 });
+  await expect(page.locator('.search-option').first()).toContainText('广州图书馆');
+  await page.keyboard.press('Enter');
+  // 飞行 800 ms，落定即选；卡片开了才算数，不是镜头动了就算数。
+  await page.waitForFunction(() => document.body.dataset.card === 'open', { timeout: 8000 });
+  const arrived = await page.evaluate(async () => {
+    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    // 卡片开了＝飞行 promise 已落定（selectFeature 就在 .then 里），镜头此刻真停在图书馆。量活相机，
+    // 不量半秒一拍的 hash——落定后那一拍可能还停在半路（中心挪了一截、朝向没动），会误报"没落到点上"。
+    return { state: neighborhood.cardState(), view: neighborhood.view(), seats: document.querySelectorAll('.engine-card-seat').length };
+  });
+  expect(arrived.state?.osmId, `检索开出来的不是图书馆：${JSON.stringify(arrived.state)}`).toBe(240896441);
+  expect(arrived.seats).toBe(1);
+  expect(arrived.view.zoom, `检索定位没到 15.4 级以上：${arrived.view.zoom}`).toBeGreaterThanOrEqual(15.4 - 1e-6);
+  expect(metres(arrived.view.center, { lat: 23.1189093, lng: 113.3206608 }),
+    `镜头没落在图书馆自己的点上：${JSON.stringify(arrived.view.center)}`).toBeLessThan(200);
+  await page.waitForFunction(() => location.hash.includes('&b=240896441'), { timeout: 4000 });
+  await expect(page.locator('.engine-card-seat')).toContainText('广州图书馆');
+  // 焦点还在检索框里：main.js 那层 Esc 是"逐层退出"（先清结果、再收面板、最后才到卡），会 stopPropagation。
+  // 所以先点检索开关把面板收了（焦点随之离开输入框），再 Esc 走的才是全局那条关卡的路——与现版同一套语义。
+  await page.locator('#search-toggle').click();
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.body.dataset.card === 'closed', { timeout: 3000 });
+  expect(errors, `检索这一块跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
+});
+
+test('the new engine walks all eight tour stops and yields the camera the moment the user touches it', async ({ page }) => {
+  test.setTimeout(300000);
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const { TOUR_STOPS } = await import('../src/tour.js');
+  await openEngine(page, 'three');
+  // waitForFunction 的谓词必须**同步**：这一版 Playwright 把 async 谓词返回的 Promise 当真值，不 await——
+  // `waitForFunction(async () => false)` 实测 18 ms 就 resolve。所以先把 neighborhood 挂到 window，谓词同步读它。
+  await page.evaluate(async () => {
+    const { neighborhood } = await import(document.querySelector('script[type="module"][src*="/src/main.js"]').src);
+    window.__tourEngine = neighborhood;
+  });
+  await page.locator('#tour-start').click();
+  expect(await page.evaluate(() => document.body.dataset.tour), '导览没开').toBe('open');
+  // 到站直接等**活相机**落到本站取景（中心 100 m 内＋层级 0.05 内＋朝向 0.5° 内），不认 travelling 旗标也不读 hash：
+  // 旗标在 moveend 微任务里翻、跨站有竞态；hash 是半秒一拍的节流序列化，落定后可能还停上一拍。
+  // 三件一起量还堵掉一个巧合：开屏中心离第一站只有 55 m，单量中心会在飞行还没起步时就判"到了"，
+  // 加上层级（开屏 15.5 ≠ 第一站 15.4）逼着飞行真跑完。飞行三件同一个缓动系数，同步到位。
+  const settledAt = (stop) => page.waitForFunction(({ lng, lat, zoom, bearing }) => {
+    const view = window.__tourEngine.view();
+    const dx = (view.center.lng - lng) * 111320 * Math.cos((lat * Math.PI) / 180);
+    const dy = (view.center.lat - lat) * 110540;
+    const db = ((view.bearing - bearing + 540) % 360) - 180;
+    return Math.hypot(dx, dy) < 100 && Math.abs(view.zoom - zoom) < 0.05 && Math.abs(db) < 0.5;
+  }, { lng: stop.center[0], lat: stop.center[1], zoom: stop.zoom, bearing: stop.bearing }, { timeout: 10000 });
+  await settledAt(TOUR_STOPS[0]);
+  // 落定之后再暂停：自动播放的 7 s 停留不该替判据计时。
+  await page.locator('#tour-play').click();
+  const marker = () => page.evaluate(() => document.querySelector('.engine-tour-marker')?.textContent ?? null);
+  for (const [index, stop] of TOUR_STOPS.entries()) {
+    await expect(page.locator('#tour-title'), `第 ${index + 1} 站的标题不对`).toHaveText(stop.name);
+    expect(await marker(), `第 ${index + 1} 站的路牌不对`).toBe(`${String(index + 1).padStart(2, '0')} · ${stop.name}`);
+    const view = await page.evaluate(() => window.__tourEngine.view());
+    expect(Math.hypot((view.center.lng - stop.center[0]) * 111320 * Math.cos((stop.center[1] * Math.PI) / 180),
+      (view.center.lat - stop.center[1]) * 110540), `第 ${index + 1} 站的中心漂了`).toBeLessThan(100);
+    expect(Math.abs(view.zoom - stop.zoom), `第 ${index + 1} 站的层级漂了：${view.zoom} vs ${stop.zoom}`).toBeLessThan(0.2);
+    expect(Math.abs(turn(stop.bearing, view.bearing)), `第 ${index + 1} 站的朝向漂了：${view.bearing}`).toBeLessThan(1);
+    if (index < TOUR_STOPS.length - 1) {
+      await page.locator('#tour-next').click();
+      await settledAt(TOUR_STOPS[index + 1]);
+    }
+  }
+  // 第八站的下一颗按钮是"完成导览"：点下去整条收掉，路牌也摘。
+  await page.locator('#tour-next').click();
+  await page.waitForFunction(() => document.body.dataset.tour === 'closed', { timeout: 5000 });
+  expect(await page.locator('#tour-player').isHidden(), '导览收了播放条还在').toBe(true);
+  expect(await marker(), '导览收了路牌还挂着').toBeNull();
+  // 用户一碰镜头导览就让位：重开之后拖一下，整条立刻收。
+  await page.locator('#tour-start').click();
+  await page.waitForFunction(() => document.body.dataset.tour === 'open', { timeout: 5000 });
+  await drag(page, { x: 720, y: 520, dx: 60, dy: 0 });
+  expect(await page.evaluate(() => document.body.dataset.tour), '拖了一下导览没让位').toBe('closed');
+  // Esc 同一条路。
+  await page.locator('#tour-start').click();
+  await page.waitForFunction(() => document.body.dataset.tour === 'open', { timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.body.dataset.tour === 'closed', { timeout: 5000 });
+  expect(errors, `导览这一块跑出了页面错误：${JSON.stringify(errors)}`).toEqual([]);
 });

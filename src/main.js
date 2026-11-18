@@ -470,25 +470,25 @@ document.addEventListener('keydown', (event) => {
 
 try {
   if (ENGINE === 'three') {
-    // Phase 0 只换渲染层的心脏：相机、光照、FPS 面板、hash，Phase 1 把地面四层与全量 3,990 栋体块接上了。
-    // 业务功能按文档要到 Phase 4 才回迁，所以除氛围与两个镜头按钮之外的控件保持禁用 —— 点亮一个会抛 TypeError 的
-    // 按钮比留着灰的更糟。
+    // Phase 0 只换渲染层的心脏；#218 把树、点击卡片、检索与导览接上之后，这一侧的交互面与现版同名同义。
+    // 还灰着的是地点清单、透视镜、宣传片与探索/环绕两档——点亮一个会抛 TypeError 的按钮比留着灰的更糟。
     const { bootThreeEngine } = await import('./engine/boot.js');
     neighborhood = await bootThreeEngine({
       container: $('map'), mode: document.body.dataset.atmosphere ?? 'day',
+      onBuildingClick: showBuilding,
+      onTourChange: renderTour,
+      onInteraction: setExploreMode,
     });
     $('map-message').hidden = true;
     // The motion switch answers too since 项 5: the engine drives the same near field and the same cross-fade clock
     // off the same 120 ms tick. What it still cannot answer is the tower's three lighting schemes - there is no tower
     // model in that scene yet - so `#tower-light` stays hidden and every button in it stays disabled.
-    for (const button of document.querySelectorAll('#atmosphere-controls button[data-atmosphere-option], #recenter-button, #overview-button, #motion-toggle')) button.disabled = false;
+    for (const button of document.querySelectorAll('#atmosphere-controls button[data-atmosphere-option], #recenter-button, #overview-button, #motion-toggle, #search-toggle, #tour-start')) button.disabled = false;
     // 这一侧还缺什么，写在界面上而不是只写在源码注释里（用户 2026-10-10 那句"灰着但不给理由"）。
-    // 三件事：灰掉的按钮各带一句原因；手势那一行改成这一侧真的会做的事（"点击楼块查看"在这里是不成立的）；
-    // 再加一行点名缺的整块。缩放这一格原来根本没有——MapLibre 那对 ＋－ 是它自带的控件，这一侧没有 MapLibre。
+    // 三件事：灰掉的按钮各带一句原因；手势那一行改成这一侧真的会做的事；再加一行点名缺的整块。
+    // 缩放这一格原来根本没有——MapLibre 那对 ＋－ 是它自带的控件，这一侧没有 MapLibre。
     for (const [id, reason] of [
       ['places-toggle', '地点清单还没接进这一侧'],
-      ['search-toggle', '楼名与地址检索还没接进这一侧'],
-      ['tour-start', '导览走的是逐栋飞镜头，这一侧还没有可点的楼块'],
       ['film-start', '宣传片使用现版完整场景，请回到不带 engine 参数的页面观看'],
       ['explore-button', '这一侧的视角由拖动直接控制，没有探索/环绕两档'],
       ['orbit-button', '这一侧的视角由拖动直接控制，没有探索/环绕两档'],
@@ -498,8 +498,8 @@ try {
     }
     for (const key of document.querySelectorAll('.scene-key button')) key.title = '新引擎预览：高度透视镜还没接进这一侧';
     $('gesture-hint').replaceChildren('拖动平移 ', element('span', '', '·'), ' ⌥ 或 右键拖动旋转 ', element('span', '', '·'),
-      ' 滚轮或 ＋－ 缩放');
-    const engineNote = element('p', 'engine-note', '新引擎预览：已接 地面、楼块、近场车流、三塔壳体与桥、广场地面；还缺 树、点击出卡片、检索与导览。');
+      ' 滚轮或 ＋－ 缩放 ', element('span', '', '·'), ' 点击楼块查看');
+    const engineNote = element('p', 'engine-note', '新引擎预览：已接 地面、楼块、树、近场车流、三塔壳体与桥、广场地面、点击卡片、检索与导览；还缺 地点清单、高度透视镜与宣传片。');
     $('gesture-hint').after(engineNote);
     const stepZoom = (delta) => {
       const view = neighborhood.view();

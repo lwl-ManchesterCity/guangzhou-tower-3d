@@ -6,6 +6,8 @@ import { attachRotate } from './gestures.js';
 import { trafficSprite } from '../traffic-life.js';
 import { createNearField, engineDecks } from '../near-field.js';
 import { createBaseBands } from '../shadow-pads.js';
+import { VEGETATION_RADIUS, createVegetation } from '../vegetation.js';
+import { carvePlaza, stoneRings } from '../plaza.js';
 
 // Which local snapshot feeds each layer. `canton-river.geojson`（那条按实测河宽描出的示意江带）从这里
 // 退场了：Phase 1 取回真岸线之后水面改画 `canton-water.geojson`，示意带宽就没有存在的必要了，但现版引擎的落水
@@ -14,6 +16,8 @@ export const ENGINE_LAYERS = {
   buildings: 'canton-buildings.geojson', streets: 'canton-streets.geojson',
   water: 'canton-water.geojson', greens: 'canton-greens.geojson', blocks: 'canton-blocks.geojson',
   river: 'canton-river.geojson', bridge: 'haixin-bridge.geojson',
+  // 塔的那条记录（#218）：命中盒、卡片与深链认的 osmId 584204634 在这份文件里，楼块快照不含它。
+  tower: 'canton-tower.geojson',
 };
 
 export async function bootThreeEngine({ container, base = '/data/', onError, ...rest }) {
@@ -40,7 +44,21 @@ export async function bootThreeEngine({ container, base = '/data/', onError, ...
   const nearField = createNearField({ streets, river, shore, origin: SCENE.center ?? DEFAULT_CENTER, sprite, decks: engineDecks(bridge) });
   // 楼根那一圈接地带：与现版共用 `src/shadow-pads.js`，所以两边的画面在这一格上是同一片影、同一个门控。
   const bases = createBaseBands({ features: (entries.find(([key]) => key === 'buildings') ?? [])[1] ?? [], origin: SCENE.center ?? DEFAULT_CENTER });
-  const engine = createEngineScene({ container, data: Object.fromEntries(entries), nearField, bases, ...rest });
+  // 树与现版是同一份装配（#218）：同一份路网/绿地/水面/楼块名单、同一个一公里、同一张"石材面让位"名单。
+  // `carvePlaza` 在这里再跑一遍是刻意的——`plaza.js`（引擎侧）自己那份 plaza 不外露 ring，这里只要 stoneRings。
+  const plaza = carvePlaza({
+    greens: (entries.find(([key]) => key === 'greens') ?? [])[1] ?? [],
+    water: shore,
+    blocks: (entries.find(([key]) => key === 'blocks') ?? [])[1] ?? [],
+    streets,
+  });
+  const greenery = createVegetation({
+    streets, greens: (entries.find(([key]) => key === 'greens') ?? [])[1] ?? [],
+    origin: SCENE.center ?? DEFAULT_CENTER, radius: VEGETATION_RADIUS,
+    avoid: stoneRings(plaza), water: shore,
+    buildings: (entries.find(([key]) => key === 'buildings') ?? [])[1] ?? [],
+  });
+  const engine = createEngineScene({ container, data: Object.fromEntries(entries), nearField, bases, greenery, ...rest });
   const gesture = attachRotate({ canvas: engine.canvas, rig: engine.rig });
   const dispose = engine.dispose;
   engine.dispose = () => {
@@ -54,8 +72,9 @@ export async function bootThreeEngine({ container, base = '/data/', onError, ...
   // 时长与现版对齐：`recenter` 1,200 ms、`overview` 1,400 ms（`src/map.js` 里那两个数），减弱动效时一律 0。
   // 在此之前这两个按钮在引擎这一侧是瞬移的，所以"点一下跳到广州塔头顶"和现版的"飞过去"不是同一个动作。
   const still = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false;
-  engine.recenter = () => engine.flyTo({ center: SCENE.center, zoom: SCENE.camera.zoom, bearing: SCENE.camera.bearing, pitch: SCENE.camera.pitch }, still() ? 0 : 1200);
-  engine.overview = () => engine.flyTo({ center: SCENE.center, zoom: 12.4, bearing: 0, pitch: 0 }, still() ? 0 : 1400);
+  // 与现版同名按钮同一条前置：飞走之前先打断导览、作废检索定位、关掉卡片（`map.js` 的 recenter/overview）。
+  engine.recenter = () => { engine.interrupt(); return engine.flyTo({ center: SCENE.center, zoom: SCENE.camera.zoom, bearing: SCENE.camera.bearing, pitch: SCENE.camera.pitch }, still() ? 0 : 1200); };
+  engine.overview = () => { engine.interrupt(); return engine.flyTo({ center: SCENE.center, zoom: 12.4, bearing: 0, pitch: 0 }, still() ? 0 : 1400); };
   // 动效开关在引擎这一侧从此也有对应动作了（车流、行人、交叉淡）。减弱动效与现版同一个判断：不开。
   engine.setMotion(!still());
   onError?.(null);

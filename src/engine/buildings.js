@@ -10,6 +10,7 @@ export const DEFAULT_HEIGHT = 9.6;
 
 const ringOf = (feature) => (feature.geometry.type === 'Polygon'
   ? feature.geometry.coordinates[0] : feature.geometry.coordinates[0]?.[0]);
+export { ringOf };
 
 const shortEdge = (ring) => {
   let shortest = Infinity;
@@ -106,7 +107,9 @@ const capAndSideCounts = (part) => {
  *
  * @param {THREE.BufferGeometry[]} parts
  * @param {string[]} [extra] 除 uv 之外要一起搬的逐顶点属性名
- * @returns {{geometry: THREE.BufferGeometry, overlay: THREE.BufferGeometry, caps: number, sides: number}}
+ * @returns {{geometry: THREE.BufferGeometry, overlay: THREE.BufferGeometry, caps: number, sides: number,
+ *   spans: {capStart: number, capCount: number, sideStart: number, sideCount: number}[]}}
+ *   `spans[i]` 是第 i 栋在合并后顶点序里的两段落点——拾取（#218）拿 faceIndex×3 回认是哪一栋。
  */
 export function mergeSolids(parts, extra = []) {
   const channels = ['position', 'uv', ...extra];
@@ -136,6 +139,14 @@ export function mergeSolids(parts, extra = []) {
   });
   const total = buffers.get('position').length / 3;
   const caps = spans.reduce((sum, [count]) => sum + count, 0);
+  // 逐栋落点：顶面那一趟从 0 起逐栋累加，侧壁那一趟从顶面总长之后起逐栋累加——与上面两趟抄写的顺序逐字对应。
+  let capAt = 0, sideAt = caps;
+  const placed = spans.map(([capCount, sideCount]) => {
+    const span = { capStart: capAt, capCount, sideStart: sideAt, sideCount };
+    capAt += capCount;
+    sideAt += sideCount;
+    return span;
+  });
   const geometry = new THREE.BufferGeometry();
   for (const [name, values] of buffers) geometry.setAttribute(name, new THREE.Float32BufferAttribute(values, items.get(name)));
   geometry.computeVertexNormals();
@@ -145,7 +156,19 @@ export function mergeSolids(parts, extra = []) {
   for (const name of channels) overlay.setAttribute(name, geometry.getAttribute(name));
   overlay.drawRange = { start: caps, count: total - caps };
   for (const part of parts) part.dispose();
-  return { geometry, overlay, caps, sides: total - caps };
+  return { geometry, overlay, caps, sides: total - caps, spans: placed };
+}
+
+/**
+ * 合并几何里的一个顶点属于第几栋（#218 拾取）。纯函数：`vertex` 是顶点序号（raycast 的 faceIndex×3），
+ * 落在哪一栋的顶面段或侧壁段里就是哪一栋；两段都不在就报 -1。Node 那侧直接拿手造的 spans 钉它。
+ */
+export function blockIndexAt(spans, vertex) {
+  for (let index = 0; index < spans.length; index++) {
+    const { capStart, capCount, sideStart, sideCount } = spans[index];
+    if ((vertex >= capStart && vertex < capStart + capCount) || (vertex >= sideStart && vertex < sideStart + sideCount)) return index;
+  }
+  return -1;
 }
 
 
@@ -169,6 +192,8 @@ export function createBuildingBuckets({ features, project, palette, heightOf = d
   const group = new THREE.Group();
   group.name = 'buildings';
   const buckets = new Map();
+  // 与几何桶逐位平行的 feature 桶（#218 拾取）：合并之后第 i 段顶点认回第 i 个 feature，靠的就是这份名单。
+  const bucketFeatures = new Map();
   const heights = [];
   const lamp = facade?.lamp ?? null;
   for (const feature of features) {
@@ -198,17 +223,18 @@ export function createBuildingBuckets({ features, project, palette, heightOf = d
       geometry.setAttribute('aLampCell', new THREE.BufferAttribute(values, 2));
       geometry.setAttribute('aLampBits', new THREE.BufferAttribute(bits, 2));
     }
-    if (!buckets.has(category)) buckets.set(category, []);
+    if (!buckets.has(category)) { buckets.set(category, []); bucketFeatures.set(category, []); }
     buckets.get(category).push(geometry);
+    bucketFeatures.get(category).push(feature);
     heights.push(height);
   }
   const merged = [], materials = [];
   for (const [category, parts] of buckets) {
-    const { geometry, overlay } = mergeSolids(parts, lamp ? ['aLampCell', 'aLampBits'] : []);
+    const { geometry, overlay, spans } = mergeSolids(parts, lamp ? ['aLampCell', 'aLampBits'] : []);
     const material = new THREE.MeshLambertMaterial({ color: palette(category) });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = `buildings-${category}`;
-    mesh.userData = { category, blocks: parts.length };
+    mesh.userData = { category, blocks: parts.length, features: bucketFeatures.get(category), spans };
     merged.push(geometry);
     materials.push(material);
     group.add(mesh);
